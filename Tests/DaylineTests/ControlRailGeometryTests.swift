@@ -61,22 +61,29 @@ final class ControlRailGeometryTests: XCTestCase {
         )
     }
 
-    func testExpandedPanelUsesNinetyPercentWithSafeInsets() {
+    func testExpandedPanelUsesConfiguredSafeWorkspaceRatio() {
         XCTAssertEqual(
-            DaylineLayout.expandedPanelHeight(visibleHeight: 1000, safeInset: 12),
+            DaylineLayout.expandedPanelHeight(availableHeight: 1000),
             900
         )
         XCTAssertEqual(
-            DaylineLayout.expandedPanelHeight(visibleHeight: 500, safeInset: 12),
-            476
+            DaylineLayout.expandedPanelHeight(availableHeight: 500),
+            480
         )
         XCTAssertEqual(
             DaylineLayout.expandedPanelHeight(
-                visibleHeight: 1000,
-                safeInset: 12,
+                availableHeight: 1000,
                 ratio: 0.75
             ),
             750
+        )
+        XCTAssertEqual(
+            DaylineLayout.expandedPanelHeight(availableHeight: 1000, ratio: 1),
+            1000
+        )
+        XCTAssertEqual(
+            DaylineLayout.expandedPanelHeight(availableHeight: 1000, ratio: 0.6),
+            600
         )
     }
 }

@@ -176,14 +176,13 @@ enum DaylineLayout {
     }
 
     static func expandedPanelHeight(
-        visibleHeight: CGFloat,
-        safeInset: CGFloat,
+        availableHeight: CGFloat,
         ratio: CGFloat = defaultExpandedPanelHeightRatio
     ) -> CGFloat {
-        let safeRatio = min(max(ratio, 0.7), 0.95)
+        let safeRatio = min(max(ratio, 0.6), 1)
         return min(
-            max(0, visibleHeight - safeInset * 2),
-            max(480, visibleHeight * safeRatio)
+            availableHeight,
+            max(480, availableHeight * safeRatio)
         )
     }
 }
@@ -212,6 +211,7 @@ enum ControlRailGeometry {
             ? visibleFrame.minX + restingAxisInset - axisOffset
             : visibleFrame.maxX - restingAxisInset - width + axisOffset
     }
+
 }
 
 enum DockResolver {

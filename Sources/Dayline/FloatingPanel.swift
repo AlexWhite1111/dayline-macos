@@ -153,8 +153,7 @@ final class FloatingPanelController: NSWindowController {
         let width = store.isExpanded ? contentWidth : collapsedSize.width
         let height = store.isExpanded
             ? DaylineLayout.expandedPanelHeight(
-                visibleHeight: visible.height,
-                safeInset: verticalInset,
+                availableHeight: visible.height,
                 ratio: store.panelHeightRatio
             )
             : collapsedSize.height
@@ -216,8 +215,10 @@ final class FloatingPanelController: NSWindowController {
         expanded: Bool
     ) -> (frameY: CGFloat, railOffset: CGFloat) {
         let handleY = clampedHandleY(proposedHandleY, in: visible, expanded: expanded)
-        let lowestY = visible.minY + verticalInset
-        let highestY = max(lowestY, visible.maxY - verticalInset - height)
+        let availableMargin = max(0, visible.height - height)
+        let edgeInset = min(verticalInset, availableMargin / 2)
+        let lowestY = visible.minY + edgeInset
+        let highestY = max(lowestY, visible.maxY - edgeInset - height)
         let frameY = min(max(handleY - height / 2, lowestY), highestY)
         return (frameY, frameY + height / 2 - handleY)
     }

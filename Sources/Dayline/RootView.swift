@@ -200,12 +200,12 @@ private struct SettingsPopover: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text("时间轴高度").font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 9) {
-                    Slider(value: $store.panelHeightRatio, in: 0.7...0.95, step: 0.05)
+                    Slider(value: $store.panelHeightRatio, in: 0.6...1, step: 0.05)
                         .controlSize(.small)
                     Text("\(Int((store.panelHeightRatio * 100).rounded()))%")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .frame(width: 30, alignment: .trailing)
+                        .frame(width: 34, alignment: .trailing)
                 }
             }
 

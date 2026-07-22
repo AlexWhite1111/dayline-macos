@@ -180,7 +180,7 @@ final class TodayStore: ObservableObject {
                 from: Data(contentsOf: stateURL)
             )
             fontSize = min(max(saved.fontSize, 13), 19)
-            panelHeightRatio = min(max(saved.panelHeightRatio ?? 0.9, 0.7), 0.95)
+            panelHeightRatio = min(max(saved.panelHeightRatio ?? 0.9, 0.6), 1)
             dockEdge = saved.dockEdge
             dockY = min(max(saved.dockY, 0.08), 0.92)
             isExpanded = saved.isExpanded
