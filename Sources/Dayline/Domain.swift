@@ -54,6 +54,7 @@ struct SavedState: Codable {
     var timelineStartMinute: Int? = nil
     var timelineEndMinute: Int? = nil
     var panelHeightRatio: Double? = nil
+    var usesNativeGlass: Bool? = nil
 }
 
 enum DayClock {

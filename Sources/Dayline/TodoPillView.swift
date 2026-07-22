@@ -84,7 +84,11 @@ struct TodoPillView: View {
         .frame(height: pillHeight)
         .fixedSize(horizontal: true, vertical: false)
         .contentShape(Capsule())
-        .glassCapsule(accentuated: isNext, shadowRadius: previewMinute == nil ? 12 : 17)
+        .glassCapsule(
+            usesNativeGlass: store.usesNativeGlass,
+            accentuated: isNext,
+            shadowRadius: previewMinute == nil ? 12 : 17
+        )
         .scaleEffect(previewMinute == nil ? 1 : 1.01)
         .overlay(alignment: store.dockEdge == .left ? .leading : .trailing) {
             if previewMinute != nil {

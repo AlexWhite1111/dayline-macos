@@ -145,7 +145,7 @@ private struct SideRail: View {
                 .contentShape(Circle())
         }
         .buttonStyle(PressScaleButtonStyle())
-        .glassCircle(shadowRadius: 9)
+        .glassCircle(usesNativeGlass: store.usesNativeGlass, shadowRadius: 9)
         .help(label)
         .accessibilityLabel(label)
     }
@@ -166,7 +166,7 @@ private struct EdgeHandle: View {
             .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
             .foregroundStyle(.primary.opacity(0.84))
             .frame(width: DaylineLayout.controlSize, height: DaylineLayout.controlSize)
-            .glassCircle(shadowRadius: 9)
+            .glassCircle(usesNativeGlass: store.usesNativeGlass, shadowRadius: 9)
             .overlay {
                 WindowDragSurface(
                     onClick: onClick,
@@ -208,6 +208,10 @@ private struct SettingsPopover: View {
                         .frame(width: 34, alignment: .trailing)
                 }
             }
+
+            Toggle("系统原生玻璃", isOn: $store.usesNativeGlass)
+                .toggleStyle(.switch)
+                .controlSize(.small)
 
             VStack(alignment: .leading, spacing: 7) {
                 Text("时间范围").font(.caption).foregroundStyle(.secondary)

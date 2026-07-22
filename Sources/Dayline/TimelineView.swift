@@ -21,6 +21,7 @@ struct TimelineView: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let fadeDistance = DaylineLayout.pillHeight(for: store.fontSize) / 2
             let slotHeight = DaylineLayout.slotHeight(for: store.fontSize)
             let topInset = max(0, (geometry.size.height - slotHeight) * DaylineLayout.viewportAnchor)
             let bottomInset = max(0, (geometry.size.height - slotHeight) * (1 - DaylineLayout.viewportAnchor))
@@ -88,7 +89,7 @@ struct TimelineView: View {
                     id: $focusMinute,
                     anchor: UnitPoint(x: 0.5, y: DaylineLayout.viewportAnchor)
                 )
-                .mask(edgeFade)
+                .mask(edgeFade(height: geometry.size.height, distance: fadeDistance))
                 .accessibilityIdentifier("dayline.timeline")
                 .accessibilityValue(focusMinute.map(DayClock.displayTime) ?? "")
                 .task(id: RangeKey(start: store.timelineStartMinute, end: store.timelineEndMinute)) {
@@ -101,7 +102,7 @@ struct TimelineView: View {
                         Circle()
                             .fill(daylineWarm)
                             .frame(width: 4, height: 4)
-                            .shadow(color: daylineWarm.opacity(0.62), radius: 3)
+                            .shadow(color: daylineWarm.opacity(0.56), radius: 1.5)
                             .frame(width: 24, height: 24)
                             .contentShape(Rectangle())
                     }
@@ -110,7 +111,9 @@ struct TimelineView: View {
                         x: store.dockEdge == .left
                             ? DaylineLayout.timelineAxisInset
                             : geometry.size.width - DaylineLayout.timelineAxisInset,
-                        y: currentIsAbove ? 10 : geometry.size.height - 10
+                        y: currentIsAbove
+                            ? fadeDistance
+                            : geometry.size.height - fadeDistance
                     )
                     .help("回到现在")
                     .accessibilityLabel("回到现在")
@@ -121,12 +124,13 @@ struct TimelineView: View {
         .onReceive(clock) { now = $0 }
     }
 
-    private var edgeFade: some View {
-        LinearGradient(
+    private func edgeFade(height: CGFloat, distance: CGFloat) -> some View {
+        let edge = min(distance / max(height, 1), 0.5)
+        return LinearGradient(
             stops: [
                 .init(color: .clear, location: 0),
-                .init(color: .black, location: 0.035),
-                .init(color: .black, location: 0.955),
+                .init(color: .black, location: edge),
+                .init(color: .black, location: 1 - edge),
                 .init(color: .clear, location: 1)
             ],
             startPoint: .top,

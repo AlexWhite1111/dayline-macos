@@ -36,10 +36,20 @@ private struct VisualEffectBackground: NSViewRepresentable {
 
 private struct GlassModifier<ShapeType: InsettableShape>: ViewModifier {
     let shape: ShapeType
+    let usesNativeGlass: Bool
     let accentuated: Bool
     let shadowRadius: CGFloat
 
+    @ViewBuilder
     func body(content: Content) -> some View {
+        if usesNativeGlass, #available(macOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: shape)
+        } else {
+            customGlass(content)
+        }
+    }
+
+    private func customGlass(_ content: Content) -> some View {
         content
             .background {
                 VisualEffectBackground()
@@ -59,19 +69,29 @@ private struct GlassModifier<ShapeType: InsettableShape>: ViewModifier {
 }
 
 extension View {
-    func glassCapsule(accentuated: Bool, shadowRadius: CGFloat) -> some View {
+    func glassCapsule(
+        usesNativeGlass: Bool,
+        accentuated: Bool,
+        shadowRadius: CGFloat
+    ) -> some View {
         modifier(
             GlassModifier(
                 shape: Capsule(),
+                usesNativeGlass: usesNativeGlass,
                 accentuated: accentuated,
                 shadowRadius: shadowRadius
             )
         )
     }
 
-    func glassCircle(shadowRadius: CGFloat) -> some View {
+    func glassCircle(usesNativeGlass: Bool, shadowRadius: CGFloat) -> some View {
         modifier(
-            GlassModifier(shape: Circle(), accentuated: false, shadowRadius: shadowRadius)
+            GlassModifier(
+                shape: Circle(),
+                usesNativeGlass: usesNativeGlass,
+                accentuated: false,
+                shadowRadius: shadowRadius
+            )
         )
     }
 }

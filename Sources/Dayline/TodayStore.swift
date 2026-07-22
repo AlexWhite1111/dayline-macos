@@ -6,6 +6,7 @@ final class TodayStore: ObservableObject {
     @Published var items: [TodoItem] = [] { didSet { saveWhenReady() } }
     @Published var fontSize: Double = 16 { didSet { saveWhenReady() } }
     @Published var panelHeightRatio: Double = 0.9 { didSet { saveWhenReady() } }
+    @Published var usesNativeGlass = true { didSet { saveWhenReady() } }
     @Published var dockEdge: DockEdge = .left { didSet { saveWhenReady() } }
     @Published var dockY: Double = 0.52 { didSet { saveWhenReady() } }
     @Published var isExpanded = true { didSet { saveWhenReady() } }
@@ -121,7 +122,8 @@ final class TodayStore: ObservableObject {
             isExpanded: isExpanded,
             timelineStartMinute: timelineStartMinute,
             timelineEndMinute: timelineEndMinute,
-            panelHeightRatio: panelHeightRatio
+            panelHeightRatio: panelHeightRatio,
+            usesNativeGlass: usesNativeGlass
         )
         do {
             try FileManager.default.createDirectory(
@@ -181,6 +183,7 @@ final class TodayStore: ObservableObject {
             )
             fontSize = min(max(saved.fontSize, 13), 19)
             panelHeightRatio = min(max(saved.panelHeightRatio ?? 0.9, 0.6), 1)
+            usesNativeGlass = saved.usesNativeGlass ?? true
             dockEdge = saved.dockEdge
             dockY = min(max(saved.dockY, 0.08), 0.92)
             isExpanded = saved.isExpanded
