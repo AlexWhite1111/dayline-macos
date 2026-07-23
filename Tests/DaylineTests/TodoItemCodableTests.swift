@@ -40,7 +40,9 @@ final class TodoItemCodableTests: XCTestCase {
             dockY: 0.42,
             isExpanded: true,
             panelHeightRatio: 0.85,
-            usesNativeGlass: false
+            usesNativeGlass: false,
+            compactTitleWidth: 164,
+            nativeGlassStyle: .clear
         )
 
         let restored = try decoder.decode(SavedState.self, from: encoder.encode(state))
@@ -55,6 +57,8 @@ final class TodoItemCodableTests: XCTestCase {
         XCTAssertEqual(restored.dockEdge, .left)
         XCTAssertEqual(restored.panelHeightRatio, 0.85)
         XCTAssertEqual(restored.usesNativeGlass, false)
+        XCTAssertEqual(restored.compactTitleWidth, 164)
+        XCTAssertEqual(restored.nativeGlassStyle, .clear)
     }
 
     private var encoder: JSONEncoder {

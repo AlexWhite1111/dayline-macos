@@ -5,8 +5,12 @@ import Foundation
 final class TodayStore: ObservableObject {
     @Published var items: [TodoItem] = [] { didSet { saveWhenReady() } }
     @Published var fontSize: Double = 16 { didSet { saveWhenReady() } }
+    @Published var compactTitleWidth = Double(DaylineLayout.defaultCompactTitleWidth) {
+        didSet { saveWhenReady() }
+    }
     @Published var panelHeightRatio: Double = 0.9 { didSet { saveWhenReady() } }
     @Published var usesNativeGlass = true { didSet { saveWhenReady() } }
+    @Published var nativeGlassStyle: NativeGlassStyle = .regular { didSet { saveWhenReady() } }
     @Published var dockEdge: DockEdge = .left { didSet { saveWhenReady() } }
     @Published var dockY: Double = 0.52 { didSet { saveWhenReady() } }
     @Published var isExpanded = true { didSet { saveWhenReady() } }
@@ -36,15 +40,20 @@ final class TodayStore: ObservableObject {
     deinit { rolloverTimer?.invalidate() }
 
     @discardableResult
-    func addTask(at minute: Int? = nil) -> UUID {
+    func addTask(
+        id: UUID = UUID(),
+        title: String = "",
+        at minute: Int? = nil
+    ) -> UUID {
         rolloverIfNeeded()
+        guard item(id: id) == nil else { return id }
         let preferred = minute ?? DayClock.defaultTaskMinute(
             start: timelineStartMinute,
             end: timelineEndMinute
         )
         let item = TodoItem(
-            id: UUID(),
-            title: "",
+            id: id,
+            title: title,
             minute: availableQuarter(near: preferred),
             createdAt: Date()
         )
@@ -68,13 +77,21 @@ final class TodayStore: ObservableObject {
 
     func toggleTitleExpansion(id: UUID) {
         mutate(id) {
-            guard DaylineLayout.titleOverflowsCompact($0.title, fontSize: fontSize) else { return }
+            guard DaylineLayout.titleOverflowsCompact(
+                $0.title,
+                fontSize: fontSize,
+                maximumWidth: CGFloat(compactTitleWidth)
+            ) else { return }
             $0.isTitleExpanded.toggle()
         }
     }
 
     func toggleCompleted(id: UUID) {
         mutate(id) { $0.isCompleted.toggle() }
+    }
+
+    func setCompleted(id: UUID, completed: Bool) {
+        mutate(id) { $0.isCompleted = completed }
     }
 
     func move(id: UUID, to minute: Int) {
@@ -123,7 +140,9 @@ final class TodayStore: ObservableObject {
             timelineStartMinute: timelineStartMinute,
             timelineEndMinute: timelineEndMinute,
             panelHeightRatio: panelHeightRatio,
-            usesNativeGlass: usesNativeGlass
+            usesNativeGlass: usesNativeGlass,
+            compactTitleWidth: compactTitleWidth,
+            nativeGlassStyle: nativeGlassStyle
         )
         do {
             try FileManager.default.createDirectory(
@@ -182,8 +201,14 @@ final class TodayStore: ObservableObject {
                 from: Data(contentsOf: stateURL)
             )
             fontSize = min(max(saved.fontSize, 13), 19)
+            compactTitleWidth = min(
+                max(saved.compactTitleWidth ?? Double(DaylineLayout.defaultCompactTitleWidth),
+                    DaylineLayout.compactTitleWidthRange.lowerBound),
+                DaylineLayout.compactTitleWidthRange.upperBound
+            )
             panelHeightRatio = min(max(saved.panelHeightRatio ?? 0.9, 0.6), 1)
             usesNativeGlass = saved.usesNativeGlass ?? true
+            nativeGlassStyle = saved.nativeGlassStyle ?? .regular
             dockEdge = saved.dockEdge
             dockY = min(max(saved.dockY, 0.08), 0.92)
             isExpanded = saved.isExpanded

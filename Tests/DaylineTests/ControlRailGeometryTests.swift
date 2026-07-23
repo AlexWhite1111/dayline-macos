@@ -3,6 +3,17 @@ import XCTest
 @testable import Dayline
 
 final class ControlRailGeometryTests: XCTestCase {
+    func testCompactPanelGrowsOnlyWhenTitleLimitExceedsDefault() {
+        XCTAssertEqual(
+            DaylineLayout.compactPanelWidth(for: 80),
+            DaylineLayout.compactPanelWidth
+        )
+        XCTAssertEqual(
+            DaylineLayout.compactPanelWidth(for: 300),
+            DaylineLayout.compactPanelWidth + 188
+        )
+    }
+
     private let visible = NSRect(x: 100, y: 50, width: 1200, height: 800)
 
     func testHiddenAxisRestsThreePointsFromEitherEdge() {

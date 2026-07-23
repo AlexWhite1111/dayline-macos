@@ -20,17 +20,22 @@ struct TodoPillView: View {
     private var visibleMinute: Int { previewMinute ?? currentItem.minute }
     private var pillHeight: CGFloat { DaylineLayout.pillHeight(for: store.fontSize) }
     private var slotHeight: CGFloat { DaylineLayout.slotHeight(for: store.fontSize) }
+    private var compactTitleWidth: CGFloat { CGFloat(store.compactTitleWidth) }
     private var naturalTitleWidth: CGFloat {
         DaylineLayout.titleWidth(currentItem.title, fontSize: store.fontSize)
     }
     private var titleOverflows: Bool {
-        DaylineLayout.titleOverflowsCompact(currentItem.title, fontSize: store.fontSize)
+        DaylineLayout.titleOverflowsCompact(
+            currentItem.title,
+            fontSize: store.fontSize,
+            maximumWidth: compactTitleWidth
+        )
     }
     private var displayedTitleWidth: CGFloat {
         if currentItem.isTitleExpanded {
             return min(naturalTitleWidth, titleLimit)
         }
-        return min(naturalTitleWidth, DaylineLayout.compactTitleWidth)
+        return min(naturalTitleWidth, compactTitleWidth)
     }
 
     var body: some View {
@@ -86,6 +91,7 @@ struct TodoPillView: View {
         .contentShape(Capsule())
         .glassCapsule(
             usesNativeGlass: store.usesNativeGlass,
+            nativeGlassStyle: store.nativeGlassStyle,
             accentuated: isNext,
             shadowRadius: previewMinute == nil ? 12 : 17
         )

@@ -10,7 +10,7 @@
 - 点击圆圈完成；待办会淡化并添加删除线。
 - 点击边缘圆点收起或展开；拖动圆点可改变高度并自动贴到左右边缘。
 - 双击时间轴可显示或隐藏三个控制按钮。
-- 设置中可调整宋体字号、时间轴高度和当天时间范围。
+- 设置中可调整宋体字号、收起标题最大宽度、时间轴高度和当天时间范围。
 
 当天数据只保存在本机；跨过设定的当天结束时间后自动清空，不保存历史。
 
@@ -23,9 +23,28 @@ scripts/build-app.sh
 
 构建结果位于 `outputs/今日.app`。
 
+## AI 与自动化接口
+
+安装后可通过 `dayline` 命令管理待办：
+
+```zsh
+dayline list --json
+dayline add --title "准备面试" --time 10:15
+dayline update <UUID> --title "进行模拟面试" --time 11:30
+dayline complete <UUID>
+dayline reopen <UUID>
+dayline delete <UUID>
+```
+
+App 同时内置标准输入输出 MCP 服务器 `dayline-mcp`，提供
+`list_todos`、`add_todo`、`update_todo`、`set_todo_completed` 和 `delete_todo`。
+CLI 与 MCP 都通过本地 `dayline://automation/v1` 协议交给运行中的 App 处理，
+不会直接并发修改数据文件。
+
 ## 技术结构
 
 - SwiftUI：胶囊、时间轴、编辑和设置界面
 - AppKit `NSPanel`：透明悬浮窗口、跨桌面显示和窗口层级
-- `NSVisualEffectView`：原生 macOS 玻璃模糊
+- SwiftUI Liquid Glass / `NSVisualEffectView`：可切换的原生玻璃效果
+- 本地 URL RPC + stdio MCP：AI 自动化接口
 - 本地 JSON：仅保存当天未完成事项与少量显示设置

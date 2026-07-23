@@ -11,6 +11,24 @@
 	</dict>
 	<key>files2</key>
 	<dict>
+		<key>MacOS/dayline-cli</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			8RsICl8PRUV4/+gOfHmmInY5QUM=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"f11b080a5f0f454578ffe80e7c79a62276394143"</string>
+		</dict>
+		<key>MacOS/dayline-mcp</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			/IbH3oJQhn47T1qaE6NbPLAupV8=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"fc86c7de8250867e3b4f5a9a13a35b3cb02ea55f"</string>
+		</dict>
 		<key>Resources/AppIcon.icns</key>
 		<dict>
 			<key>hash2</key>

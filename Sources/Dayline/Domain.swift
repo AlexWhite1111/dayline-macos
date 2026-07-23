@@ -5,6 +5,13 @@ enum DockEdge: String, Codable {
     case right
 }
 
+enum NativeGlassStyle: String, Codable, CaseIterable, Identifiable {
+    case regular
+    case clear
+
+    var id: Self { self }
+}
+
 struct TodoItem: Identifiable, Codable {
     let id: UUID
     var title: String
@@ -55,6 +62,8 @@ struct SavedState: Codable {
     var timelineEndMinute: Int? = nil
     var panelHeightRatio: Double? = nil
     var usesNativeGlass: Bool? = nil
+    var compactTitleWidth: Double? = nil
+    var nativeGlassStyle: NativeGlassStyle? = nil
 }
 
 enum DayClock {
@@ -136,7 +145,8 @@ enum DaylineLayout {
     static let timelineAxisInset: CGFloat = 7
     static let pillInset: CGFloat = 18
     static let pillOuterInset: CGFloat = 8
-    static let compactTitleWidth: CGFloat = 112
+    static let defaultCompactTitleWidth: CGFloat = 112
+    static let compactTitleWidthRange: ClosedRange<Double> = 80...300
     static let viewportAnchor: CGFloat = 0.35
 
     static var axisToPillGap: CGFloat { pillInset - timelineAxisInset }
@@ -146,8 +156,12 @@ enum DaylineLayout {
         return (0..<1).contains(fraction) ? fraction : nil
     }
 
-    static var compactTimelineWidth: CGFloat {
-        compactPanelWidth
+    static func compactPanelWidth(for titleWidth: CGFloat) -> CGFloat {
+        compactPanelWidth + max(0, titleWidth - defaultCompactTitleWidth)
+    }
+
+    static func compactTimelineWidth(for titleWidth: CGFloat) -> CGFloat {
+        compactPanelWidth(for: titleWidth)
             - panelHorizontalPadding * 2
             - controlSize
             - railSpacing
@@ -160,8 +174,12 @@ enum DaylineLayout {
         return ceil((value as NSString).size(withAttributes: [.font: font]).width) + 3
     }
 
-    static func titleOverflowsCompact(_ title: String, fontSize: Double) -> Bool {
-        !title.isEmpty && titleWidth(title, fontSize: fontSize) > compactTitleWidth
+    static func titleOverflowsCompact(
+        _ title: String,
+        fontSize: Double,
+        maximumWidth: CGFloat = defaultCompactTitleWidth
+    ) -> Bool {
+        !title.isEmpty && titleWidth(title, fontSize: fontSize) > maximumWidth
     }
 
     static func pillHeight(for fontSize: Double) -> CGFloat {

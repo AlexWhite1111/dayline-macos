@@ -1,4 +1,5 @@
 import AppKit
+import DaylineAutomation
 
 @main
 struct DaylineApp {
@@ -16,6 +17,8 @@ struct DaylineApp {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: TodayStore?
     private var panelController: FloatingPanelController?
+    private var automationController: AutomationController?
+    private var pendingAutomationURLs: [URL] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installApplicationMenu()
@@ -24,11 +27,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = FloatingPanelController(store: store)
         self.store = store
         self.panelController = controller
+        automationController = AutomationController(store: store)
         controller.show()
+
+        pendingAutomationURLs.forEach(handleAutomationURL)
+        pendingAutomationURLs.removeAll()
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard automationController != nil else {
+            pendingAutomationURLs.append(contentsOf: urls)
+            return
+        }
+        urls.forEach(handleAutomationURL)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    private func handleAutomationURL(_ url: URL) {
+        do {
+            let request = try DaylineAutomationRequest(url: url)
+            guard let automationController else { return }
+            let response = automationController.execute(request)
+            try DaylineAutomationResponses.write(response, for: request.requestID)
+        } catch {
+            NSLog("Dayline automation failed: \(error.localizedDescription)")
+        }
     }
 
     private func installApplicationMenu() {

@@ -16,7 +16,9 @@ final class FloatingPanelController: NSWindowController {
     private var controlsAreVisible = true
     private var dockedScreen: NSScreen?
 
-    private let normalWidth = DaylineLayout.compactPanelWidth
+    private var normalWidth: CGFloat {
+        DaylineLayout.compactPanelWidth(for: CGFloat(store.compactTitleWidth))
+    }
     private let collapsedSize = NSSize(width: 48, height: 44)
     private let edgeInset: CGFloat = 2
     private let verticalInset: CGFloat = 12
@@ -24,7 +26,12 @@ final class FloatingPanelController: NSWindowController {
     init(store: TodayStore) {
         self.store = store
         panel = FloatingPanel(
-            contentRect: NSRect(x: 0, y: 0, width: normalWidth, height: 680),
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: DaylineLayout.compactPanelWidth(for: CGFloat(store.compactTitleWidth)),
+                height: 680
+            ),
             styleMask: [.borderless, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -97,6 +104,11 @@ final class FloatingPanelController: NSWindowController {
             .removeDuplicates()
             .sink { [weak self] _ in self?.applyFrame() }
             .store(in: &subscriptions)
+
+        store.$compactTitleWidth
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.applyFrame() }
+            .store(in: &subscriptions)
     }
 
     private func toggleExpanded() {
@@ -147,7 +159,7 @@ final class FloatingPanelController: NSWindowController {
             .map { DaylineLayout.titleWidth($0.title, fontSize: store.fontSize) }
             .max() ?? 0
         let contentWidth = min(
-            normalWidth + max(0, expandedTitleWidth - DaylineLayout.compactTitleWidth),
+            normalWidth + max(0, expandedTitleWidth - CGFloat(store.compactTitleWidth)),
             visible.width - 4
         )
         let width = store.isExpanded ? contentWidth : collapsedSize.width

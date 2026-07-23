@@ -181,11 +181,12 @@ private struct TimelineSlotRow: View {
             let pillCenter = store.dockEdge == .left
                 ? DaylineLayout.pillInset + pillWidth / 2
                 : DaylineLayout.pillOuterInset + pillWidth / 2
+            let compactTitleWidth = CGFloat(store.compactTitleWidth)
             let titleLimit = max(
-                DaylineLayout.compactTitleWidth,
-                DaylineLayout.compactTitleWidth
+                compactTitleWidth,
+                compactTitleWidth
                     + geometry.size.width
-                    - DaylineLayout.compactTimelineWidth
+                    - DaylineLayout.compactTimelineWidth(for: compactTitleWidth)
             )
 
             ZStack(alignment: .topLeading) {

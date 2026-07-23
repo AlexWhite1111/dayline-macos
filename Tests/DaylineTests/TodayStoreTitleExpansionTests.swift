@@ -36,6 +36,31 @@ final class TodayStoreTitleExpansionTests: XCTestCase {
         XCTAssertTrue(store.item(id: id)?.isTitleExpanded == true)
     }
 
+    func testCompactTitleWidthControlsWhenExpansionBecomesAvailable() {
+        let (store, url) = makeStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let id = store.addTask()
+        store.updateTitle(id: id, title: "一二三四五六七八")
+
+        store.compactTitleWidth = DaylineLayout.compactTitleWidthRange.upperBound
+        store.toggleTitleExpansion(id: id)
+        XCTAssertFalse(store.item(id: id)?.isTitleExpanded == true)
+
+        store.compactTitleWidth = DaylineLayout.compactTitleWidthRange.lowerBound
+        store.toggleTitleExpansion(id: id)
+        XCTAssertTrue(store.item(id: id)?.isTitleExpanded == true)
+    }
+
+    func testCompactTitleWidthPersists() {
+        let (store, url) = makeStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        store.compactTitleWidth = 164
+        store.persist()
+
+        let restored = TodayStore(stateURL: url, startsTimer: false)
+        XCTAssertEqual(restored.compactTitleWidth, 164)
+    }
+
     private func makeStore() -> (TodayStore, URL) {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)

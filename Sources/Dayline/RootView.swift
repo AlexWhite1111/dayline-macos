@@ -145,7 +145,11 @@ private struct SideRail: View {
                 .contentShape(Circle())
         }
         .buttonStyle(PressScaleButtonStyle())
-        .glassCircle(usesNativeGlass: store.usesNativeGlass, shadowRadius: 9)
+        .glassCircle(
+            usesNativeGlass: store.usesNativeGlass,
+            nativeGlassStyle: store.nativeGlassStyle,
+            shadowRadius: 9
+        )
         .help(label)
         .accessibilityLabel(label)
     }
@@ -166,7 +170,11 @@ private struct EdgeHandle: View {
             .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
             .foregroundStyle(.primary.opacity(0.84))
             .frame(width: DaylineLayout.controlSize, height: DaylineLayout.controlSize)
-            .glassCircle(usesNativeGlass: store.usesNativeGlass, shadowRadius: 9)
+            .glassCircle(
+                usesNativeGlass: store.usesNativeGlass,
+                nativeGlassStyle: store.nativeGlassStyle,
+                shadowRadius: 9
+            )
             .overlay {
                 WindowDragSurface(
                     onClick: onClick,
@@ -198,6 +206,23 @@ private struct SettingsPopover: View {
             }
 
             VStack(alignment: .leading, spacing: 7) {
+                Text("标题最大宽度").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 9) {
+                    Slider(
+                        value: $store.compactTitleWidth,
+                        in: DaylineLayout.compactTitleWidthRange,
+                        step: 4
+                    )
+                    .controlSize(.small)
+                    .accessibilityLabel("默认标题最大宽度")
+                    Text("\(Int(store.compactTitleWidth.rounded()))")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, alignment: .trailing)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
                 Text("时间轴高度").font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 9) {
                     Slider(value: $store.panelHeightRatio, in: 0.6...1, step: 0.05)
@@ -212,6 +237,15 @@ private struct SettingsPopover: View {
             Toggle("系统原生玻璃", isOn: $store.usesNativeGlass)
                 .toggleStyle(.switch)
                 .controlSize(.small)
+
+            if store.usesNativeGlass {
+                Picker("原生玻璃材质", selection: $store.nativeGlassStyle) {
+                    Text("Regular").tag(NativeGlassStyle.regular)
+                    Text("Clear").tag(NativeGlassStyle.clear)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
 
             VStack(alignment: .leading, spacing: 7) {
                 Text("时间范围").font(.caption).foregroundStyle(.secondary)
