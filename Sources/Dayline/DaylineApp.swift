@@ -42,6 +42,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         urls.forEach(handleAutomationURL)
     }
 
+    func applicationDidResignActive(_ notification: Notification) {
+        store?.commitEditing()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }

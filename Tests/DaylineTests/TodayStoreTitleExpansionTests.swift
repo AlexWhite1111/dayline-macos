@@ -51,14 +51,30 @@ final class TodayStoreTitleExpansionTests: XCTestCase {
         XCTAssertTrue(store.item(id: id)?.isTitleExpanded == true)
     }
 
-    func testCompactTitleWidthPersists() {
+    func testLayoutSettingsPersist() {
         let (store, url) = makeStore()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         store.compactTitleWidth = 164
+        store.titleHeightRatio = 0.58
+        store.timelineAnchorPosition = 0.82
         store.persist()
 
         let restored = TodayStore(stateURL: url, startsTimer: false)
         XCTAssertEqual(restored.compactTitleWidth, 164)
+        XCTAssertEqual(restored.titleHeightRatio, 0.58)
+        XCTAssertEqual(restored.timelineAnchorPosition, 0.82)
+    }
+
+    func testCommitEditingFinalizesTheActiveTitleAndClearsEditing() {
+        let (store, url) = makeStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let id = store.addTask(title: "  修改内容  ")
+        store.editingID = id
+
+        store.commitEditing()
+
+        XCTAssertEqual(store.item(id: id)?.title, "修改内容")
+        XCTAssertNil(store.editingID)
     }
 
     private func makeStore() -> (TodayStore, URL) {

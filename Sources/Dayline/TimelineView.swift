@@ -1,30 +1,27 @@
-import Combine
 import SwiftUI
 
 struct TimelineView: View {
     @ObservedObject var store: TodayStore
     @Binding var focusMinute: Int?
-    @Binding var editingID: UUID?
-    let onControlsToggle: () -> Void
-
-    @State private var now = Date()
-    @State private var draggingID: UUID?
-    @State private var projectionMinute: Int?
-
-    private let clock = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
-
-    private var sortedItems: [TodoItem] {
-        store.items.sorted {
-            $0.minute == $1.minute ? $0.createdAt < $1.createdAt : $0.minute < $1.minute
-        }
-    }
+    let onFirstSlotCenterChanged: (CGFloat) -> Void
 
     var body: some View {
         GeometryReader { geometry in
-            let fadeDistance = DaylineLayout.pillHeight(for: store.fontSize) / 2
+            let fadeDistance = DaylineLayout.timelineFadeDistance(for: store.fontSize)
             let slotHeight = DaylineLayout.slotHeight(for: store.fontSize)
-            let topInset = max(0, (geometry.size.height - slotHeight) * DaylineLayout.viewportAnchor)
-            let bottomInset = max(0, (geometry.size.height - slotHeight) * (1 - DaylineLayout.viewportAnchor))
+            let viewportAnchor = DaylineLayout.timelineViewportAnchor(
+                position: store.timelineAnchorPosition
+            )
+            let anchorY = DaylineLayout.timelineAnchorCenterY(
+                viewportHeight: geometry.size.height,
+                fontSize: store.fontSize,
+                position: store.timelineAnchorPosition
+            )
+            let topInset = max(0, (geometry.size.height - slotHeight) * viewportAnchor)
+            let bottomInset = max(
+                0,
+                (geometry.size.height - slotHeight) * (1 - viewportAnchor)
+            )
             let slots = Array(
                 stride(
                     from: store.timelineStartMinute,
@@ -32,18 +29,21 @@ struct TimelineView: View {
                     by: 15
                 )
             )
-            let itemsByMinute = Dictionary(uniqueKeysWithValues: sortedItems.map { ($0.minute, $0) })
-            let currentMinute = DayClock.minuteOfDay(for: now, dayEndMinute: store.timelineEndMinute)
-            let nextID = sortedItems.first {
-                !$0.isCompleted && $0.minute >= currentMinute
-            }?.id
+            let currentMinute = DayClock.minuteOfDay(
+                for: store.clockDate,
+                dayEndMinute: store.timelineEndMinute
+            )
             let anchor = focusMinute ?? DayClock.quarterAtOrAfter(
                 currentMinute,
                 start: store.timelineStartMinute,
                 end: store.timelineEndMinute
             )
-            let currentScreenY = geometry.size.height * DaylineLayout.viewportAnchor
-                + CGFloat(currentMinute - anchor) / 15 * slotHeight
+            let currentScreenY = DaylineLayout.timelineCenterY(
+                minute: currentMinute,
+                referenceMinute: anchor,
+                referenceCenterY: anchorY,
+                fontSize: store.fontSize
+            )
             let currentIsAbove = currentScreenY < -3
             let currentIsBelow = currentScreenY > geometry.size.height + 3
 
@@ -54,28 +54,16 @@ struct TimelineView: View {
 
                         LazyVStack(spacing: 0) {
                             ForEach(slots, id: \.self) { minute in
-                                TimelineSlotRow(
-                                    store: store,
-                                    item: itemsByMinute[minute],
-                                    editingID: $editingID,
+                                SlotScale(
                                     minute: minute,
                                     nowMinute: currentMinute,
-                                    projectionMinute: projectionMinute,
-                                    isNext: itemsByMinute[minute]?.id == nextID,
+                                    projectionMinute: store.projectionMinute,
+                                    dockEdge: store.dockEdge,
                                     isFirst: minute == store.timelineStartMinute,
-                                    isLast: minute == store.timelineEndMinute,
-                                    slotHeight: slotHeight,
-                                    onControlsToggle: onControlsToggle,
-                                    onDragBegan: { id in draggingID = id },
-                                    onDragChanged: { projectionMinute = $0 },
-                                    onDragEnded: {
-                                        draggingID = nil
-                                        projectionMinute = nil
-                                    }
+                                    isLast: minute == store.timelineEndMinute
                                 )
                                 .frame(height: slotHeight)
                                 .id(minute)
-                                .zIndex(draggingID == itemsByMinute[minute]?.id ? 20 : 0)
                             }
                         }
                         .scrollTargetLayout()
@@ -87,12 +75,21 @@ struct TimelineView: View {
                 .scrollIndicators(.hidden)
                 .scrollPosition(
                     id: $focusMinute,
-                    anchor: UnitPoint(x: 0.5, y: DaylineLayout.viewportAnchor)
+                    anchor: UnitPoint(x: 0.5, y: viewportAnchor)
+                )
+                .onScrollGeometryChange(
+                    for: CGFloat.self,
+                    of: { scrollGeometry in
+                        topInset + slotHeight / 2 - scrollGeometry.contentOffset.y
+                    },
+                    action: { _, firstSlotCenterY in
+                        onFirstSlotCenterChanged(firstSlotCenterY)
+                    }
                 )
                 .mask(edgeFade(height: geometry.size.height, distance: fadeDistance))
                 .accessibilityIdentifier("dayline.timeline")
                 .accessibilityValue(focusMinute.map(DayClock.displayTime) ?? "")
-                .task(id: RangeKey(start: store.timelineStartMinute, end: store.timelineEndMinute)) {
+                .task(id: [store.timelineStartMinute, store.timelineEndMinute]) {
                     await Task.yield()
                     seedFocus(currentMinute)
                 }
@@ -103,7 +100,10 @@ struct TimelineView: View {
                             .fill(daylineWarm)
                             .frame(width: 4, height: 4)
                             .shadow(color: daylineWarm.opacity(0.56), radius: 1.5)
-                            .frame(width: 24, height: 24)
+                            .frame(
+                                width: DaylineLayout.currentTimeButtonHitSize,
+                                height: DaylineLayout.currentTimeButtonHitSize
+                            )
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -121,7 +121,6 @@ struct TimelineView: View {
                 }
             }
         }
-        .onReceive(clock) { now = $0 }
     }
 
     private func edgeFade(height: CGFloat, distance: CGFloat) -> some View {
@@ -147,90 +146,6 @@ struct TimelineView: View {
                 start: store.timelineStartMinute,
                 end: store.timelineEndMinute
             )
-        }
-    }
-}
-
-private struct RangeKey: Hashable {
-    let start: Int
-    let end: Int
-}
-
-private struct TimelineSlotRow: View {
-    @ObservedObject var store: TodayStore
-    let item: TodoItem?
-    @Binding var editingID: UUID?
-    let minute: Int
-    let nowMinute: Int
-    let projectionMinute: Int?
-    let isNext: Bool
-    let isFirst: Bool
-    let isLast: Bool
-    let slotHeight: CGFloat
-    let onControlsToggle: () -> Void
-    let onDragBegan: (UUID) -> Void
-    let onDragChanged: (Int) -> Void
-    let onDragEnded: () -> Void
-
-    var body: some View {
-        GeometryReader { geometry in
-            let pillWidth = max(
-                0,
-                geometry.size.width - DaylineLayout.pillInset - DaylineLayout.pillOuterInset
-            )
-            let pillCenter = store.dockEdge == .left
-                ? DaylineLayout.pillInset + pillWidth / 2
-                : DaylineLayout.pillOuterInset + pillWidth / 2
-            let compactTitleWidth = CGFloat(store.compactTitleWidth)
-            let titleLimit = max(
-                compactTitleWidth,
-                compactTitleWidth
-                    + geometry.size.width
-                    - DaylineLayout.compactTimelineWidth(for: compactTitleWidth)
-            )
-
-            ZStack(alignment: .topLeading) {
-                Color.white.opacity(0.001)
-                    .frame(width: DaylineLayout.timelineHitWidth, height: slotHeight)
-                    .position(
-                        x: store.dockEdge == .left
-                            ? DaylineLayout.timelineHitWidth / 2
-                            : geometry.size.width - DaylineLayout.timelineHitWidth / 2,
-                        y: slotHeight / 2
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 2, perform: onControlsToggle)
-                    .help("双击显示或隐藏控制")
-                    .accessibilityHidden(true)
-
-                SlotScale(
-                    minute: minute,
-                    nowMinute: nowMinute,
-                    projectionMinute: projectionMinute,
-                    dockEdge: store.dockEdge,
-                    isFirst: isFirst,
-                    isLast: isLast
-                )
-                .allowsHitTesting(false)
-
-                if let item {
-                    TodoPillView(
-                        store: store,
-                        item: item,
-                        editingID: $editingID,
-                        isNext: isNext,
-                        titleLimit: titleLimit,
-                        onDragBegan: { onDragBegan(item.id) },
-                        onDragChanged: onDragChanged,
-                        onDragEnded: onDragEnded
-                    )
-                    .frame(
-                        width: pillWidth,
-                        alignment: store.dockEdge == .left ? .leading : .trailing
-                    )
-                    .position(x: pillCenter, y: slotHeight / 2)
-                }
-            }
         }
     }
 }

@@ -3,20 +3,35 @@ import Foundation
 
 @MainActor
 final class TodayStore: ObservableObject {
+    static let defaultClickGuardDuration = 0.25
+    static let clickGuardDurationRange = 0.0...0.6
+
     @Published var items: [TodoItem] = [] { didSet { saveWhenReady() } }
     @Published var fontSize: Double = 16 { didSet { saveWhenReady() } }
+    @Published var titleHeightRatio = DaylineLayout.defaultTitleHeightRatio {
+        didSet { saveWhenReady() }
+    }
     @Published var compactTitleWidth = Double(DaylineLayout.defaultCompactTitleWidth) {
         didSet { saveWhenReady() }
     }
     @Published var panelHeightRatio: Double = 0.9 { didSet { saveWhenReady() } }
-    @Published var usesNativeGlass = true { didSet { saveWhenReady() } }
+    @Published var timelineAnchorPosition = DaylineLayout.defaultTimelineAnchorPosition {
+        didSet { saveWhenReady() }
+    }
     @Published var nativeGlassStyle: NativeGlassStyle = .regular { didSet { saveWhenReady() } }
+    @Published var pinsOnlyCurrentTask = false { didSet { saveWhenReady() } }
+    @Published var clickGuardDuration = defaultClickGuardDuration { didSet { saveWhenReady() } }
     @Published var dockEdge: DockEdge = .left { didSet { saveWhenReady() } }
     @Published var dockY: Double = 0.52 { didSet { saveWhenReady() } }
     @Published var isExpanded = true { didSet { saveWhenReady() } }
     @Published var railOffsetY: CGFloat = 0
     @Published var timelineStartMinute = DayClock.startMinute { didSet { saveWhenReady() } }
     @Published var timelineEndMinute = DayClock.endMinute { didSet { saveWhenReady() } }
+    @Published var focusMinute: Int?
+    @Published var editingID: UUID?
+    @Published var projectionMinute: Int?
+    @Published var pillTitleLimit = DaylineLayout.defaultCompactTitleWidth
+    @Published private(set) var clockDate = Date()
 
     private(set) var hasSavedPlacement = false
     private var currentDayKey = ""
@@ -32,7 +47,11 @@ final class TodayStore: ObservableObject {
         if startsTimer {
             rolloverTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) {
                 [weak self] _ in
-                Task { @MainActor in self?.rolloverIfNeeded() }
+                Task { @MainActor in
+                    let now = Date()
+                    self?.rolloverIfNeeded(now: now)
+                    self?.clockDate = now
+                }
             }
         }
     }
@@ -65,6 +84,13 @@ final class TodayStore: ObservableObject {
         items.first { $0.id == id }
     }
 
+    func currentTask(at minute: Int) -> TodoItem? {
+        items.sorted {
+            $0.minute == $1.minute ? $0.createdAt < $1.createdAt : $0.minute < $1.minute
+        }
+        .first { !$0.isCompleted && $0.minute >= minute }
+    }
+
     func updateTitle(id: UUID, title: String) {
         mutate(id) { $0.title = title }
     }
@@ -75,11 +101,18 @@ final class TodayStore: ObservableObject {
         value.isEmpty ? delete(id: id) : updateTitle(id: id, title: value)
     }
 
+    func commitEditing() {
+        guard let editingID else { return }
+        finalizeTitle(id: editingID)
+        self.editingID = nil
+    }
+
     func toggleTitleExpansion(id: UUID) {
         mutate(id) {
             guard DaylineLayout.titleOverflowsCompact(
                 $0.title,
                 fontSize: fontSize,
+                titleHeightRatio: titleHeightRatio,
                 maximumWidth: CGFloat(compactTitleWidth)
             ) else { return }
             $0.isTitleExpanded.toggle()
@@ -97,6 +130,17 @@ final class TodayStore: ObservableObject {
     func move(id: UUID, to minute: Int) {
         let destination = availableQuarter(near: minute, excluding: id)
         mutate(id) { $0.minute = destination }
+    }
+
+    func dragDestination(near minute: Double, excluding id: UUID) -> Int {
+        availableQuarter(
+            near: DayClock.quarterAtOrAfter(
+                minute,
+                start: timelineStartMinute,
+                end: timelineEndMinute
+            ),
+            excluding: id
+        )
     }
 
     func delete(id: UUID) {
@@ -134,15 +178,18 @@ final class TodayStore: ObservableObject {
             dayKey: currentDayKey,
             items: items,
             fontSize: fontSize,
+            titleHeightRatio: titleHeightRatio,
             dockEdge: dockEdge,
             dockY: dockY,
             isExpanded: isExpanded,
             timelineStartMinute: timelineStartMinute,
             timelineEndMinute: timelineEndMinute,
             panelHeightRatio: panelHeightRatio,
-            usesNativeGlass: usesNativeGlass,
+            timelineAnchorPosition: timelineAnchorPosition,
             compactTitleWidth: compactTitleWidth,
-            nativeGlassStyle: nativeGlassStyle
+            nativeGlassStyle: nativeGlassStyle,
+            pinsOnlyCurrentTask: pinsOnlyCurrentTask,
+            clickGuardDuration: clickGuardDuration
         )
         do {
             try FileManager.default.createDirectory(
@@ -201,14 +248,35 @@ final class TodayStore: ObservableObject {
                 from: Data(contentsOf: stateURL)
             )
             fontSize = min(max(saved.fontSize, 13), 19)
+            titleHeightRatio = min(
+                max(
+                    saved.titleHeightRatio ?? DaylineLayout.defaultTitleHeightRatio,
+                    DaylineLayout.titleHeightRatioRange.lowerBound
+                ),
+                DaylineLayout.titleHeightRatioRange.upperBound
+            )
             compactTitleWidth = min(
                 max(saved.compactTitleWidth ?? Double(DaylineLayout.defaultCompactTitleWidth),
                     DaylineLayout.compactTitleWidthRange.lowerBound),
                 DaylineLayout.compactTitleWidthRange.upperBound
             )
             panelHeightRatio = min(max(saved.panelHeightRatio ?? 0.9, 0.6), 1)
-            usesNativeGlass = saved.usesNativeGlass ?? true
+            timelineAnchorPosition = min(
+                max(
+                    saved.timelineAnchorPosition ?? DaylineLayout.defaultTimelineAnchorPosition,
+                    DaylineLayout.timelineAnchorPositionRange.lowerBound
+                ),
+                DaylineLayout.timelineAnchorPositionRange.upperBound
+            )
             nativeGlassStyle = saved.nativeGlassStyle ?? .regular
+            pinsOnlyCurrentTask = saved.pinsOnlyCurrentTask ?? false
+            clickGuardDuration = min(
+                max(
+                    saved.clickGuardDuration ?? Self.defaultClickGuardDuration,
+                    Self.clickGuardDurationRange.lowerBound
+                ),
+                Self.clickGuardDurationRange.upperBound
+            )
             dockEdge = saved.dockEdge
             dockY = min(max(saved.dockY, 0.08), 0.92)
             isExpanded = saved.isExpanded

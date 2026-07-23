@@ -15,19 +15,19 @@
 		<dict>
 			<key>cdhash</key>
 			<data>
-			8RsICl8PRUV4/+gOfHmmInY5QUM=
+			RkfNKNen5BB3GMyJa3XlysrRzmM=
 			</data>
 			<key>requirement</key>
-			<string>cdhash H"f11b080a5f0f454578ffe80e7c79a62276394143"</string>
+			<string>cdhash H"4647cd28d7a7e4107718cc896b75e5cacad1ce63"</string>
 		</dict>
 		<key>MacOS/dayline-mcp</key>
 		<dict>
 			<key>cdhash</key>
 			<data>
-			/IbH3oJQhn47T1qaE6NbPLAupV8=
+			rgtBliR9bKnQQ2cPamcZ6zXQQZw=
 			</data>
 			<key>requirement</key>
-			<string>cdhash H"fc86c7de8250867e3b4f5a9a13a35b3cb02ea55f"</string>
+			<string>cdhash H"ae0b4196247d6ca9d043670f6a6719eb35d0419c"</string>
 		</dict>
 		<key>Resources/AppIcon.icns</key>
 		<dict>

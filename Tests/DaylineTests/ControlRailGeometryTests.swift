@@ -72,6 +72,125 @@ final class ControlRailGeometryTests: XCTestCase {
         )
     }
 
+    func testTimelineFogUsesHalfPillHeight() {
+        let fontSize = 16.0
+        let fade = DaylineLayout.timelineFadeDistance(for: fontSize)
+        let height: CGFloat = 600
+
+        XCTAssertEqual(fade, DaylineLayout.pillHeight(for: fontSize) / 2)
+        XCTAssertEqual(
+            DaylineLayout.timelineEdgeOpacity(
+                centerY: 0,
+                viewportHeight: height,
+                fontSize: fontSize
+            ),
+            0
+        )
+        XCTAssertEqual(
+            DaylineLayout.timelineEdgeOpacity(
+                centerY: fade,
+                viewportHeight: height,
+                fontSize: fontSize
+            ),
+            1
+        )
+    }
+
+    func testTimelineProjectionIsSymmetricAroundAnchor() {
+        let fontSize = 16.0
+        let height: CGFloat = 600
+        let anchorY = DaylineLayout.timelineAnchorCenterY(
+            viewportHeight: height,
+            fontSize: fontSize,
+            position: DaylineLayout.defaultTimelineAnchorPosition
+        )
+        let slotHeight = DaylineLayout.slotHeight(for: fontSize)
+
+        XCTAssertEqual(
+            DaylineLayout.timelineCenterY(
+                minute: 12 * 60,
+                referenceMinute: 12 * 60,
+                referenceCenterY: anchorY,
+                fontSize: fontSize
+            ),
+            anchorY,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            DaylineLayout.timelineCenterY(
+                minute: 12 * 60 + 15,
+                referenceMinute: 12 * 60,
+                referenceCenterY: anchorY,
+                fontSize: fontSize
+            ),
+            anchorY + slotHeight,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            DaylineLayout.timelineCenterY(
+                minute: 12 * 60 - 15,
+                referenceMinute: 12 * 60,
+                referenceCenterY: anchorY,
+                fontSize: fontSize
+            ),
+            anchorY - slotHeight,
+            accuracy: 0.001
+        )
+    }
+
+    func testTimelineAnchorRunsFromSafeBottomToSafeTop() {
+        let fontSize = 16.0
+        let height: CGFloat = 600
+        let halfSlot = DaylineLayout.slotHeight(for: fontSize) / 2
+
+        XCTAssertEqual(
+            DaylineLayout.timelineAnchorCenterY(
+                viewportHeight: height,
+                fontSize: fontSize,
+                position: 0
+            ),
+            height - halfSlot,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            DaylineLayout.timelineAnchorCenterY(
+                viewportHeight: height,
+                fontSize: fontSize,
+                position: 1
+            ),
+            halfSlot,
+            accuracy: 0.001
+        )
+    }
+
+    func testTimelineHitWindowLeavesRealSpaceForCurrentTimeButtons() {
+        let panel = NSRect(x: 100, y: 50, width: 398, height: 680)
+        let timeline = FloatingItemGeometry.timelineFrame(in: panel, edge: .left)
+        let clearance = DaylineLayout.timelineFadeDistance(for: 16)
+            + DaylineLayout.currentTimeButtonHitSize / 2
+        let lane = FloatingItemGeometry.axisHitFrame(
+            in: panel,
+            edge: .left,
+            edgeClearance: clearance
+        )
+
+        XCTAssertEqual(lane.minY, timeline.minY + clearance, accuracy: 0.001)
+        XCTAssertEqual(lane.maxY, timeline.maxY - clearance, accuracy: 0.001)
+    }
+
+    func testPinnedHitLaneMirrorsAroundTheTimelineAxis() {
+        let panel = NSRect(x: 100, y: 50, width: 398, height: 680)
+        let leftTimeline = FloatingItemGeometry.timelineFrame(in: panel, edge: .left)
+        let leftLane = FloatingItemGeometry.axisHitFrame(in: panel, edge: .left)
+        let rightTimeline = FloatingItemGeometry.timelineFrame(in: panel, edge: .right)
+        let rightLane = FloatingItemGeometry.axisHitFrame(in: panel, edge: .right)
+
+        XCTAssertEqual(leftTimeline.minX + 7 - leftLane.minX, 7)
+        XCTAssertEqual(leftLane.maxX - (leftTimeline.minX + 7), 3)
+        XCTAssertEqual(rightTimeline.maxX - 7 - rightLane.minX, 3)
+        XCTAssertEqual(rightLane.maxX - (rightTimeline.maxX - 7), 7)
+    }
+
     func testExpandedPanelUsesConfiguredSafeWorkspaceRatio() {
         XCTAssertEqual(
             DaylineLayout.expandedPanelHeight(availableHeight: 1000),

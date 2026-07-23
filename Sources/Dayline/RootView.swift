@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 struct RootView: View {
@@ -6,10 +7,8 @@ struct RootView: View {
     let onHandleClick: () -> Void
     let onHandleDragChanged: (NSPoint) -> Void
     let onHandleDragEnded: (NSPoint) -> Void
-    let onControlsToggle: () -> Void
-
-    @State private var editingID: UUID?
-    @State private var focusMinute: Int?
+    let onSettingsPresented: (Bool) -> Void
+    let onTimelineFirstSlotCenterChanged: (CGFloat) -> Void
 
     var body: some View {
         Group {
@@ -23,7 +22,7 @@ struct RootView: View {
                         rail
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, DaylineLayout.panelVerticalPadding)
                 .padding(.horizontal, DaylineLayout.panelHorizontalPadding)
             } else {
                 rail.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -47,6 +46,7 @@ struct RootView: View {
                 commitEditing()
                 onHandleDragEnded(point)
             },
+            onSettingsPresented: onSettingsPresented,
             onBeforeAction: commitEditing,
             onAdd: addTask
         )
@@ -57,15 +57,15 @@ struct RootView: View {
     private var timeline: some View {
         TimelineView(
             store: store,
-            focusMinute: $focusMinute,
-            editingID: $editingID,
-            onControlsToggle: onControlsToggle
+            focusMinute: $store.focusMinute,
+            onFirstSlotCenterChanged: onTimelineFirstSlotCenterChanged
         )
     }
 
     private func seedFocus() {
-        let preferred = focusMinute ?? DayClock.minuteOfDay(dayEndMinute: store.timelineEndMinute)
-        focusMinute = DayClock.quarterAtOrAfter(
+        let preferred = store.focusMinute
+            ?? DayClock.minuteOfDay(dayEndMinute: store.timelineEndMinute)
+        store.focusMinute = DayClock.quarterAtOrAfter(
             preferred,
             start: store.timelineStartMinute,
             end: store.timelineEndMinute
@@ -74,21 +74,19 @@ struct RootView: View {
 
     private func addTask() {
         let minute = DayClock.quarterAtOrAfter(
-            focusMinute ?? DayClock.defaultTaskMinute(
+            store.focusMinute ?? DayClock.defaultTaskMinute(
                 start: store.timelineStartMinute,
                 end: store.timelineEndMinute
             ),
             start: store.timelineStartMinute,
             end: store.timelineEndMinute
         )
-        editingID = store.addTask(at: minute)
+        store.editingID = store.addTask(at: minute)
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
     private func commitEditing() {
-        guard let editingID else { return }
-        store.finalizeTitle(id: editingID)
-        self.editingID = nil
+        store.commitEditing()
     }
 }
 
@@ -97,6 +95,7 @@ private struct SideRail: View {
     let onHandleClick: () -> Void
     let onHandleDragChanged: (NSPoint) -> Void
     let onHandleDragEnded: (NSPoint) -> Void
+    let onSettingsPresented: (Bool) -> Void
     let onBeforeAction: () -> Void
     let onAdd: () -> Void
 
@@ -127,6 +126,9 @@ private struct SideRail: View {
                 }
             }
         }
+        .onChange(of: showsSettings) { _, visible in
+            onSettingsPresented(visible)
+        }
         .alignmentGuide(VerticalAlignment.center) { dimensions in
             dimensions[.top] + DaylineLayout.controlSize / 2
         }
@@ -145,11 +147,7 @@ private struct SideRail: View {
                 .contentShape(Circle())
         }
         .buttonStyle(PressScaleButtonStyle())
-        .glassCircle(
-            usesNativeGlass: store.usesNativeGlass,
-            nativeGlassStyle: store.nativeGlassStyle,
-            shadowRadius: 9
-        )
+        .glassCircle(nativeGlassStyle: store.nativeGlassStyle)
         .help(label)
         .accessibilityLabel(label)
     }
@@ -170,11 +168,7 @@ private struct EdgeHandle: View {
             .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
             .foregroundStyle(.primary.opacity(0.84))
             .frame(width: DaylineLayout.controlSize, height: DaylineLayout.controlSize)
-            .glassCircle(
-                usesNativeGlass: store.usesNativeGlass,
-                nativeGlassStyle: store.nativeGlassStyle,
-                shadowRadius: 9
-            )
+            .glassCircle(nativeGlassStyle: store.nativeGlassStyle)
             .overlay {
                 WindowDragSurface(
                     onClick: onClick,
@@ -189,6 +183,8 @@ private struct EdgeHandle: View {
 
 private struct SettingsPopover: View {
     @ObservedObject var store: TodayStore
+    @State private var launchAtLoginStatus = SMAppService.mainApp.status
+    @State private var launchAtLoginError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -202,6 +198,22 @@ private struct SettingsPopover: View {
                     Slider(value: $store.fontSize, in: 13...19, step: 0.5)
                         .controlSize(.small)
                     Text("A").font(.system(size: 18, weight: .medium))
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("标题占高").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 9) {
+                    Slider(
+                        value: $store.titleHeightRatio,
+                        in: DaylineLayout.titleHeightRatioRange,
+                        step: 0.01
+                    )
+                    .controlSize(.small)
+                    Text("\(Int((store.titleHeightRatio * 100).rounded()))%")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, alignment: .trailing)
                 }
             }
 
@@ -234,17 +246,60 @@ private struct SettingsPopover: View {
                 }
             }
 
-            Toggle("系统原生玻璃", isOn: $store.usesNativeGlass)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-
-            if store.usesNativeGlass {
-                Picker("原生玻璃材质", selection: $store.nativeGlassStyle) {
-                    Text("Regular").tag(NativeGlassStyle.regular)
-                    Text("Clear").tag(NativeGlassStyle.clear)
+            VStack(alignment: .leading, spacing: 7) {
+                Text("时间轴停靠位置").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 9) {
+                    Slider(
+                        value: $store.timelineAnchorPosition,
+                        in: DaylineLayout.timelineAnchorPositionRange,
+                        step: 0.01
+                    )
+                    .controlSize(.small)
+                    .accessibilityLabel("时间轴停靠位置，从底部向上")
+                    Text("\(Int((store.timelineAnchorPosition * 100).rounded()))%")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, alignment: .trailing)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("单双击保护时间").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 9) {
+                    Slider(
+                        value: $store.clickGuardDuration,
+                        in: TodayStore.clickGuardDurationRange,
+                        step: 0.05
+                    )
+                    .controlSize(.small)
+                    Text(String(format: "%.2f s", store.clickGuardDuration))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 42, alignment: .trailing)
+                }
+            }
+
+            Picker("玻璃材质", selection: $store.nativeGlassStyle) {
+                Text("Regular").tag(NativeGlassStyle.regular)
+                Text("Clear").tag(NativeGlassStyle.clear)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("开机自动启动", isOn: launchAtLoginBinding)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+
+                if let launchAtLoginNote {
+                    Text(launchAtLoginNote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .onAppear {
+                launchAtLoginError = nil
+                refreshLaunchAtLogin()
             }
 
             VStack(alignment: .leading, spacing: 7) {
@@ -288,5 +343,45 @@ private struct SettingsPopover: View {
 
     private var endBinding: Binding<Int> {
         Binding(get: { store.timelineEndMinute }, set: store.setTimelineEnd)
+    }
+
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: {
+                launchAtLoginStatus == .enabled || launchAtLoginStatus == .requiresApproval
+            },
+            set: setLaunchAtLogin
+        )
+    }
+
+    private var launchAtLoginNote: String? {
+        if let launchAtLoginError { return launchAtLoginError }
+        switch launchAtLoginStatus {
+        case .requiresApproval:
+            return "需要在系统设置的登录项中允许。"
+        case .notFound:
+            return "系统没有找到当前应用。"
+        default:
+            return nil
+        }
+    }
+
+    private func setLaunchAtLogin(_ enabled: Bool) {
+        let service = SMAppService.mainApp
+        do {
+            if enabled {
+                try service.register()
+            } else {
+                try service.unregister()
+            }
+            launchAtLoginError = nil
+        } catch {
+            launchAtLoginError = error.localizedDescription
+        }
+        refreshLaunchAtLogin()
+    }
+
+    private func refreshLaunchAtLogin() {
+        launchAtLoginStatus = SMAppService.mainApp.status
     }
 }

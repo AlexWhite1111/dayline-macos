@@ -4,53 +4,114 @@ import SwiftUI
 struct TodoPillView: View {
     @ObservedObject var store: TodayStore
     let item: TodoItem
-    @Binding var editingID: UUID?
-    let isNext: Bool
-    let titleLimit: CGFloat
-    let onDragBegan: () -> Void
-    let onDragChanged: (Int) -> Void
+    let onDragBegan: (CGFloat) -> Void
+    let onDragChanged: () -> Int?
     let onDragEnded: () -> Void
+    let onSizeChanged: () -> Void
 
     @State private var isHovering = false
     @State private var previewMinute: Int?
-    @GestureState private var dragOffset: CGFloat = 0
     @FocusState private var titleIsFocused: Bool
 
+    private enum Metrics {
+        static let leadingPadding: CGFloat = 7
+        static let trailingPadding: CGFloat = 4
+        static let controlGap: CGFloat = 3
+        static let completionWidth: CGFloat = 20
+        static let expansionWidth: CGFloat = 16
+        static let deleteWidth: CGFloat = 11
+        static let timeWidth: CGFloat = 44
+        static let dragActivationDistance: CGFloat = 3
+    }
+
+    private struct LayoutSignature: Equatable {
+        let titleWidth: CGFloat
+        let showsExpansion: Bool
+        let height: CGFloat
+    }
+
     private var currentItem: TodoItem { store.item(id: item.id) ?? item }
+    private var isNext: Bool {
+        store.currentTask(
+            at: DayClock.minuteOfDay(
+                for: store.clockDate,
+                dayEndMinute: store.timelineEndMinute
+            )
+        )?.id == item.id
+    }
     private var visibleMinute: Int { previewMinute ?? currentItem.minute }
     private var pillHeight: CGFloat { DaylineLayout.pillHeight(for: store.fontSize) }
-    private var slotHeight: CGFloat { DaylineLayout.slotHeight(for: store.fontSize) }
     private var compactTitleWidth: CGFloat { CGFloat(store.compactTitleWidth) }
     private var naturalTitleWidth: CGFloat {
-        DaylineLayout.titleWidth(currentItem.title, fontSize: store.fontSize)
+        DaylineLayout.titleWidth(
+            currentItem.title,
+            fontSize: store.fontSize,
+            titleHeightRatio: store.titleHeightRatio
+        )
     }
     private var titleOverflows: Bool {
         DaylineLayout.titleOverflowsCompact(
             currentItem.title,
             fontSize: store.fontSize,
+            titleHeightRatio: store.titleHeightRatio,
             maximumWidth: compactTitleWidth
         )
     }
     private var displayedTitleWidth: CGFloat {
         if currentItem.isTitleExpanded {
-            return min(naturalTitleWidth, titleLimit)
+            return min(naturalTitleWidth, store.pillTitleLimit)
         }
         return min(naturalTitleWidth, compactTitleWidth)
     }
+    private var isEditing: Bool { store.editingID == item.id }
+    private var showsDelete: Bool { isHovering && !isEditing }
+    private var layoutSignature: LayoutSignature {
+        LayoutSignature(
+            titleWidth: displayedTitleWidth,
+            showsExpansion: titleOverflows,
+            height: pillHeight
+        )
+    }
 
     var body: some View {
-        HStack(spacing: 3) {
-            Button { store.toggleCompleted(id: item.id) } label: {
+        pill
+            .onDisappear {
+                commitEditing()
+                guard previewMinute != nil else { return }
+                previewMinute = nil
+                store.projectionMinute = nil
+                onDragEnded()
+            }
+            .accessibilityElement(children: .contain)
+    }
+
+    private var pill: some View {
+        HStack(spacing: 0) {
+            Button {
+                performAfterCommittingEdit { store.toggleCompleted(id: item.id) }
+            } label: {
                 Image(systemName: currentItem.isCompleted ? "circle.fill" : "circle")
                     .font(.system(size: min(max(store.fontSize + 1, 14), 17), weight: .medium))
                     .foregroundStyle(completionColor)
+                    .frame(width: Metrics.completionWidth, height: 20)
                     .contentShape(Circle())
             }
             .buttonStyle(PressScaleButtonStyle(pressedScale: 0.9))
             .accessibilityLabel(currentItem.isCompleted ? "标记为未完成" : "标记完成")
 
+            Color.clear.frame(width: Metrics.controlGap)
+
             title
-                .font(.custom("Songti SC", fixedSize: store.fontSize + 1.5).weight(.medium))
+                .font(
+                    .custom(
+                        "Songti SC",
+                        fixedSize: DaylineLayout.titleFontSize(
+                            for: store.fontSize,
+                            heightRatio: store.titleHeightRatio
+                        )
+                    )
+                    .weight(.medium)
+                )
                 .foregroundStyle(
                     currentItem.isCompleted
                         ? Color.secondary.opacity(0.5)
@@ -59,87 +120,103 @@ struct TodoPillView: View {
                 .strikethrough(currentItem.isCompleted, color: .secondary.opacity(0.72))
 
             if titleOverflows {
-                Button { store.toggleTitleExpansion(id: item.id) } label: {
+                Color.clear.frame(width: Metrics.controlGap)
+
+                Button {
+                    performAfterCommittingEdit { store.toggleTitleExpansion(id: item.id) }
+                } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(daylineWarm.opacity(0.92))
-                        .frame(width: 16, height: 20)
+                        .frame(width: Metrics.expansionWidth, height: 20)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PressScaleButtonStyle(pressedScale: 0.9))
                 .accessibilityLabel(currentItem.isTitleExpanded ? "收起完整标题" : "展开完整标题")
             }
 
-            if isHovering && editingID != item.id {
-                Button { store.delete(id: item.id) } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 11, height: 20)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(PressScaleButtonStyle())
-                .accessibilityLabel("删除 \(currentItem.title)")
-            }
+            deleteControl
+                .frame(width: DaylineLayout.pillDeleteWidth, alignment: .trailing)
+                .opacity(showsDelete ? 1 : 0)
+                .allowsHitTesting(showsDelete)
+                .accessibilityHidden(!showsDelete)
+
+            Color.clear.frame(width: Metrics.controlGap)
 
             timeMenu
         }
-        .padding(.leading, 7)
-        .padding(.trailing, 4)
+        .padding(.leading, Metrics.leadingPadding)
+        .padding(.trailing, Metrics.trailingPadding)
         .frame(height: pillHeight)
         .fixedSize(horizontal: true, vertical: false)
         .contentShape(Capsule())
-        .glassCapsule(
-            usesNativeGlass: store.usesNativeGlass,
-            nativeGlassStyle: store.nativeGlassStyle,
-            accentuated: isNext,
-            shadowRadius: previewMinute == nil ? 12 : 17
-        )
-        .scaleEffect(previewMinute == nil ? 1 : 1.01)
+        .glassCapsule(nativeGlassStyle: store.nativeGlassStyle)
         .overlay(alignment: store.dockEdge == .left ? .leading : .trailing) {
             if previewMinute != nil {
-                ZStack {
-                    Capsule().fill(.black.opacity(0.34)).frame(height: 3)
-                    Capsule().fill(daylineWarm).frame(height: 1.4)
-                }
-                .frame(width: DaylineLayout.axisToPillGap, height: 4)
-                .offset(
-                    x: store.dockEdge == .left
-                        ? -DaylineLayout.axisToPillGap
-                        : DaylineLayout.axisToPillGap
-                )
-                .allowsHitTesting(false)
+                Capsule()
+                    .fill(daylineWarm)
+                    .frame(width: DaylineLayout.axisToPillGap, height: 1.4)
+                    .offset(
+                        x: store.dockEdge == .left
+                            ? -DaylineLayout.axisToPillGap
+                            : DaylineLayout.axisToPillGap
+                    )
+                    .allowsHitTesting(false)
             }
         }
-        .offset(y: dragOffset)
         .onHover { isHovering = $0 }
-        .simultaneousGesture(dragGesture, including: editingID == item.id ? .none : .gesture)
+        .onChange(of: layoutSignature) { _, _ in onSizeChanged() }
+        .simultaneousGesture(
+            dragGesture,
+            including: isEditing ? .subviews : .all
+        )
         .onAppear(perform: updateFocus)
-        .onChange(of: editingID) { _, _ in updateFocus() }
+        .onChange(of: store.editingID) { _, _ in updateFocus() }
         .onChange(of: titleIsFocused) { _, focused in
             if !focused { commitEditing() }
         }
-        .accessibilityElement(children: .contain)
     }
 
-    @ViewBuilder
     private var title: some View {
-        if editingID == item.id {
-            TextField("今天要做什么？", text: titleBinding)
-                .textFieldStyle(.plain)
-                .focused($titleIsFocused)
-                .onSubmit(commitEditing)
-                .onExitCommand(perform: commitEditing)
-                .frame(width: displayedTitleWidth, alignment: .leading)
-        } else {
+        ZStack(alignment: .leading) {
             Text(currentItem.title.isEmpty ? "今天要做什么？" : currentItem.title)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(width: displayedTitleWidth, alignment: .leading)
                 .clipped()
                 .contentShape(Rectangle())
-                .onTapGesture(perform: beginEditing)
+                .opacity(isEditing ? 0 : 1)
+                .allowsHitTesting(!isEditing)
+                .accessibilityHidden(isEditing)
+                .onTapGesture(count: 2, perform: beginEditing)
+
+            TextField("今天要做什么？", text: titleBinding)
+                .textFieldStyle(.plain)
+                .focused($titleIsFocused)
+                .onSubmit(commitEditing)
+                .onExitCommand(perform: commitEditing)
+                .frame(width: displayedTitleWidth, alignment: .leading)
+                .opacity(isEditing ? 1 : 0)
+                .allowsHitTesting(isEditing)
+                .disabled(!isEditing)
+                .accessibilityHidden(!isEditing)
         }
+        .frame(width: displayedTitleWidth, alignment: .leading)
+    }
+
+    private var deleteControl: some View {
+        Button {
+            performAfterCommittingEdit { store.delete(id: item.id) }
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(width: Metrics.deleteWidth, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .padding(.leading, Metrics.controlGap)
+        .accessibilityLabel("删除 \(currentItem.title)")
     }
 
     private var timeMenu: some View {
@@ -148,7 +225,9 @@ struct TodoPillView: View {
                 Array(stride(from: store.timelineStartMinute, through: store.timelineEndMinute - 15, by: 15)),
                 id: \.self
             ) { minute in
-                Button { store.move(id: item.id, to: minute) } label: {
+                Button {
+                    performAfterCommittingEdit { store.move(id: item.id, to: minute) }
+                } label: {
                     if minute == currentItem.minute {
                         Label(DayClock.displayTime(minute), systemImage: "checkmark")
                     } else {
@@ -167,14 +246,8 @@ struct TodoPillView: View {
                     .monospacedDigit()
                 )
                 .foregroundStyle(timeColor)
+                .frame(width: Metrics.timeWidth)
                 .padding(.vertical, 1)
-                .padding(.horizontal, 5)
-                .overlay {
-                    Capsule().stroke(
-                        Color(nsColor: .separatorColor).opacity(0.48),
-                        lineWidth: 0.6
-                    )
-                }
                 .contentShape(Capsule())
         }
         .menuStyle(.borderlessButton)
@@ -201,40 +274,33 @@ struct TodoPillView: View {
     }
 
     private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 8, coordinateSpace: .global)
-            .updating($dragOffset) { value, state, transaction in
-                transaction.animation = nil
-                state = value.translation.height
-            }
+        DragGesture(
+            minimumDistance: Metrics.dragActivationDistance,
+            coordinateSpace: .global
+        )
             .onChanged { value in
-                if previewMinute == nil { onDragBegan() }
-                let minute = dragMinute(for: value.translation.height)
-                previewMinute = minute
-                onDragChanged(minute)
+                guard value.translation.height != 0 else { return }
+                if previewMinute == nil { onDragBegan(value.translation.height) }
+                guard let minute = onDragChanged() else { return }
+                if previewMinute != minute { previewMinute = minute }
+                if store.projectionMinute != minute { store.projectionMinute = minute }
             }
-            .onEnded { value in
-                store.move(id: item.id, to: dragMinute(for: value.translation.height))
+            .onEnded { _ in
+                guard previewMinute != nil else { return }
                 previewMinute = nil
+                store.projectionMinute = nil
                 onDragEnded()
             }
     }
 
-    private func dragMinute(for translation: CGFloat) -> Int {
-        DayClock.quarterAtOrAfter(
-            Double(currentItem.minute) + Double(translation / slotHeight) * 15,
-            start: store.timelineStartMinute,
-            end: store.timelineEndMinute
-        )
-    }
-
     private func beginEditing() {
-        if let editingID, editingID != item.id { store.finalizeTitle(id: editingID) }
+        if store.editingID != item.id { store.commitEditing() }
         NSApplication.shared.activate(ignoringOtherApps: true)
-        self.editingID = item.id
+        store.editingID = item.id
     }
 
     private func updateFocus() {
-        guard editingID == item.id else {
+        guard store.editingID == item.id else {
             titleIsFocused = false
             return
         }
@@ -242,8 +308,12 @@ struct TodoPillView: View {
     }
 
     private func commitEditing() {
-        guard editingID == item.id else { return }
-        store.finalizeTitle(id: item.id)
-        editingID = nil
+        guard store.editingID == item.id else { return }
+        store.commitEditing()
+    }
+
+    private func performAfterCommittingEdit(_ action: () -> Void) {
+        store.commitEditing()
+        action()
     }
 }

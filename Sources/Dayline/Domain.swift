@@ -5,11 +5,9 @@ enum DockEdge: String, Codable {
     case right
 }
 
-enum NativeGlassStyle: String, Codable, CaseIterable, Identifiable {
+enum NativeGlassStyle: String, Codable {
     case regular
     case clear
-
-    var id: Self { self }
 }
 
 struct TodoItem: Identifiable, Codable {
@@ -55,22 +53,24 @@ struct SavedState: Codable {
     var dayKey: String
     var items: [TodoItem]
     var fontSize: Double
+    var titleHeightRatio: Double? = nil
     var dockEdge: DockEdge
     var dockY: Double
     var isExpanded: Bool
     var timelineStartMinute: Int? = nil
     var timelineEndMinute: Int? = nil
     var panelHeightRatio: Double? = nil
-    var usesNativeGlass: Bool? = nil
+    var timelineAnchorPosition: Double? = nil
     var compactTitleWidth: Double? = nil
     var nativeGlassStyle: NativeGlassStyle? = nil
+    var pinsOnlyCurrentTask: Bool? = nil
+    var clickGuardDuration: Double? = nil
 }
 
 enum DayClock {
     static let startMinute = 7 * 60
     static let endMinute = 25 * 60
     static let lastTaskMinute = endMinute - 15
-    static let quarterHours = Array(stride(from: startMinute, through: lastTaskMinute, by: 15))
 
     static func dayKey(for date: Date = Date(), dayEndMinute: Int = endMinute) -> String {
         let calendar = Calendar.autoupdatingCurrent
@@ -140,14 +140,22 @@ enum DaylineLayout {
     static let controlSize: CGFloat = 36
     static let timelineHitWidth: CGFloat = 10
     static let panelHorizontalPadding: CGFloat = 6
+    static let panelVerticalPadding: CGFloat = 4
     static let railSpacing: CGFloat = 4
     static let railButtonSpacing: CGFloat = 6
     static let timelineAxisInset: CGFloat = 7
     static let pillInset: CGFloat = 18
     static let pillOuterInset: CGFloat = 8
+    static let pillWindowPadding: CGFloat = 20
+    static let pillDeleteWidth: CGFloat = 14
+    static let currentTimeButtonHitSize: CGFloat = 24
     static let defaultCompactTitleWidth: CGFloat = 112
     static let compactTitleWidthRange: ClosedRange<Double> = 80...300
-    static let viewportAnchor: CGFloat = 0.35
+    static let defaultTitleHeightRatio = 0.44
+    static let titleHeightRatioRange: ClosedRange<Double> = 0.4...0.75
+    static let defaultTimelineAnchorPosition = 0.97
+    static let timelineAnchorPositionRange: ClosedRange<Double> = 0...1
+    private static let songtiInkToPointSizeRatio: CGFloat = 0.96
 
     static var axisToPillGap: CGFloat { pillInset - timelineAxisInset }
 
@@ -167,9 +175,17 @@ enum DaylineLayout {
             - railSpacing
     }
 
-    static func titleWidth(_ title: String, fontSize: Double) -> CGFloat {
+    static func titleFontSize(for fontSize: Double, heightRatio: Double) -> CGFloat {
+        pillHeight(for: fontSize) * CGFloat(heightRatio) / songtiInkToPointSizeRatio
+    }
+
+    static func titleWidth(
+        _ title: String,
+        fontSize: Double,
+        titleHeightRatio: Double
+    ) -> CGFloat {
         let value = title.isEmpty ? "今天要做什么？" : title
-        let size = fontSize + 1.5
+        let size = titleFontSize(for: fontSize, heightRatio: titleHeightRatio)
         let font = NSFont(name: "Songti SC", size: size) ?? NSFont.systemFont(ofSize: size)
         return ceil((value as NSString).size(withAttributes: [.font: font]).width) + 3
     }
@@ -177,9 +193,14 @@ enum DaylineLayout {
     static func titleOverflowsCompact(
         _ title: String,
         fontSize: Double,
+        titleHeightRatio: Double,
         maximumWidth: CGFloat = defaultCompactTitleWidth
     ) -> Bool {
-        !title.isEmpty && titleWidth(title, fontSize: fontSize) > maximumWidth
+        !title.isEmpty && titleWidth(
+            title,
+            fontSize: fontSize,
+            titleHeightRatio: titleHeightRatio
+        ) > maximumWidth
     }
 
     static func pillHeight(for fontSize: Double) -> CGFloat {
@@ -190,8 +211,45 @@ enum DaylineLayout {
         pillHeight(for: fontSize) + 4
     }
 
-    static func hourHeight(for fontSize: Double) -> CGFloat {
-        slotHeight(for: fontSize) * 4
+    static func timelineFadeDistance(for fontSize: Double) -> CGFloat {
+        pillHeight(for: fontSize) / 2
+    }
+
+    static func timelineViewportAnchor(position: Double) -> CGFloat {
+        CGFloat(1 - min(max(position, 0), 1))
+    }
+
+    static func timelineAnchorCenterY(
+        viewportHeight: CGFloat,
+        fontSize: Double,
+        position: Double
+    ) -> CGFloat {
+        let visibleSlotHeight = min(slotHeight(for: fontSize), max(viewportHeight, 0))
+        return max(0, viewportHeight - visibleSlotHeight)
+            * timelineViewportAnchor(position: position)
+            + visibleSlotHeight / 2
+    }
+
+    static func timelineCenterY(
+        minute: Int,
+        referenceMinute: Int,
+        referenceCenterY: CGFloat,
+        fontSize: Double
+    ) -> CGFloat {
+        referenceCenterY
+            + CGFloat(minute - referenceMinute) / 15 * slotHeight(for: fontSize)
+    }
+
+    static func timelineEdgeOpacity(
+        centerY: CGFloat,
+        viewportHeight: CGFloat,
+        fontSize: Double
+    ) -> CGFloat {
+        let distance = max(timelineFadeDistance(for: fontSize), 1)
+        return min(
+            max(min(centerY, viewportHeight - centerY) / distance, 0),
+            1
+        )
     }
 
     static func expandedPanelHeight(
@@ -202,6 +260,54 @@ enum DaylineLayout {
         return min(
             availableHeight,
             max(480, availableHeight * safeRatio)
+        )
+    }
+}
+
+enum FloatingItemGeometry {
+    static func timelineFrame(in panelFrame: NSRect, edge: DockEdge) -> NSRect {
+        let railWidth = DaylineLayout.controlSize + DaylineLayout.railSpacing
+        let x = panelFrame.minX + DaylineLayout.panelHorizontalPadding
+            + (edge == .left ? railWidth : 0)
+        return NSRect(
+            x: x,
+            y: panelFrame.minY + DaylineLayout.panelVerticalPadding,
+            width: max(0, panelFrame.width - DaylineLayout.panelHorizontalPadding * 2 - railWidth),
+            height: max(0, panelFrame.height - DaylineLayout.panelVerticalPadding * 2)
+        )
+    }
+
+    static func axisHitFrame(
+        in panelFrame: NSRect,
+        edge: DockEdge,
+        edgeClearance: CGFloat = 0
+    ) -> NSRect {
+        let timeline = timelineFrame(in: panelFrame, edge: edge)
+        let verticalInset = min(max(0, edgeClearance), timeline.height / 2)
+        return NSRect(
+            x: edge == .left ? timeline.minX : timeline.maxX - DaylineLayout.timelineHitWidth,
+            y: timeline.minY + verticalInset,
+            width: DaylineLayout.timelineHitWidth,
+            height: timeline.height - verticalInset * 2
+        )
+    }
+
+    static func taskFrame(
+        in panelFrame: NSRect,
+        edge: DockEdge,
+        centerY: CGFloat,
+        taskSize: NSSize
+    ) -> NSRect {
+        let timeline = timelineFrame(in: panelFrame, edge: edge)
+        let x = edge == .left
+            ? timeline.minX + DaylineLayout.pillInset - DaylineLayout.pillWindowPadding
+            : timeline.maxX - DaylineLayout.pillOuterInset
+                + DaylineLayout.pillWindowPadding - taskSize.width
+        return NSRect(
+            x: x,
+            y: timeline.maxY - centerY - taskSize.height / 2,
+            width: taskSize.width,
+            height: taskSize.height
         )
     }
 }

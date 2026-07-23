@@ -36,13 +36,16 @@ final class TodoItemCodableTests: XCTestCase {
             dayKey: "2026-07-22",
             items: [item],
             fontSize: 16,
+            titleHeightRatio: 0.58,
             dockEdge: .left,
             dockY: 0.42,
             isExpanded: true,
             panelHeightRatio: 0.85,
-            usesNativeGlass: false,
+            timelineAnchorPosition: 0.82,
             compactTitleWidth: 164,
-            nativeGlassStyle: .clear
+            nativeGlassStyle: .clear,
+            pinsOnlyCurrentTask: true,
+            clickGuardDuration: 0.35
         )
 
         let restored = try decoder.decode(SavedState.self, from: encoder.encode(state))
@@ -55,10 +58,13 @@ final class TodoItemCodableTests: XCTestCase {
         XCTAssertTrue(restoredItem.isTitleExpanded)
         XCTAssertTrue(restoredItem.isCompleted)
         XCTAssertEqual(restored.dockEdge, .left)
+        XCTAssertEqual(restored.titleHeightRatio, 0.58)
         XCTAssertEqual(restored.panelHeightRatio, 0.85)
-        XCTAssertEqual(restored.usesNativeGlass, false)
+        XCTAssertEqual(restored.timelineAnchorPosition, 0.82)
         XCTAssertEqual(restored.compactTitleWidth, 164)
         XCTAssertEqual(restored.nativeGlassStyle, .clear)
+        XCTAssertEqual(restored.pinsOnlyCurrentTask, true)
+        XCTAssertEqual(restored.clickGuardDuration, 0.35)
     }
 
     private var encoder: JSONEncoder {
