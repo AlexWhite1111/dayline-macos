@@ -75,7 +75,6 @@ struct TimelineView: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
-                .scrollIndicators(.hidden)
                 .scrollPosition(
                     id: $focusMinute,
                     anchor: UnitPoint(x: 0.5, y: viewportAnchor)

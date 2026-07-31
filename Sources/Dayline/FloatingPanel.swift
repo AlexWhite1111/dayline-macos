@@ -46,12 +46,12 @@ final class FloatingPanelController: NSWindowController {
     private var todoPanels: [UUID: FloatingPanel] = [:]
     private var dragSession: TodoDragSession?
     private var timelineProjection: TimelineProjection?
+    private weak var cachedTimelineScrollView: NSScrollView?
     private var subscriptions = Set<AnyCancellable>()
     private var controlsAreVisible = true
     private var isSettingsPresented = false
     private var dockedScreen: NSScreen?
-    private var layoutUpdateIsScheduled = false
-    private var overlayStateUpdateIsScheduled = false
+    private var pendingOverlayUpdate: Bool?
     private var autoReturnWorkItem: DispatchWorkItem?
     private var autoReturnIsActive = false
 
@@ -104,6 +104,7 @@ final class FloatingPanelController: NSWindowController {
                 onSettingsPresented: { [weak self] in self?.setSettingsPresented($0) },
                 onTimelineProjectionChanged: { [weak self] projection in
                     guard let self else { return }
+                    _ = self.timelineScrollView()
                     let sizeChanged = self.timelineProjection?.fontSize != projection.fontSize
                     self.timelineProjection = projection
                     if sizeChanged { self.updateAxisFrame() }
@@ -123,7 +124,7 @@ final class FloatingPanelController: NSWindowController {
 
     func show() {
         refreshWindowLevels()
-        reconcileOverlaysSoon()
+        scheduleOverlayUpdate(reconcile: true)
     }
 
     private func configureAxisPanel() {
@@ -162,7 +163,7 @@ final class FloatingPanelController: NSWindowController {
         store.$items
             .map { $0.map(\.id) }
             .removeDuplicates()
-            .sink { [weak self] _ in self?.reconcileOverlaysSoon() }
+            .sink { [weak self] _ in self?.scheduleOverlayUpdate(reconcile: true) }
             .store(in: &subscriptions)
 
         let taskStates = store.$items
@@ -182,7 +183,7 @@ final class FloatingPanelController: NSWindowController {
             Publishers.CombineLatest(taskStates, clockMinute)
         )
             .sink { [weak self] _, _, _, _ in
-                self?.refreshOverlayStateSoon()
+                self?.scheduleOverlayUpdate(reconcile: false)
             }
             .store(in: &subscriptions)
 
@@ -318,25 +319,22 @@ final class FloatingPanelController: NSWindowController {
         return true
     }
 
-    private func reconcileOverlaysSoon() {
-        guard !layoutUpdateIsScheduled else { return }
-        layoutUpdateIsScheduled = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.layoutUpdateIsScheduled = false
-            self.reconcileOverlays()
+    private func scheduleOverlayUpdate(reconcile: Bool) {
+        if let pendingOverlayUpdate {
+            self.pendingOverlayUpdate = pendingOverlayUpdate || reconcile
+            return
         }
-    }
-
-    private func refreshOverlayStateSoon() {
-        guard !overlayStateUpdateIsScheduled else { return }
-        overlayStateUpdateIsScheduled = true
+        pendingOverlayUpdate = reconcile
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.overlayStateUpdateIsScheduled = false
-            self.updateOverlayPositions()
-            self.refreshWindowLevels()
-            self.refreshTaskPanelKeyFocus()
+            guard let self, let shouldReconcile = self.pendingOverlayUpdate else { return }
+            self.pendingOverlayUpdate = nil
+            if shouldReconcile {
+                self.reconcileOverlays()
+            } else {
+                self.updateOverlayPositions()
+                self.refreshWindowLevels()
+                self.refreshTaskPanelKeyFocus()
+            }
         }
     }
 
@@ -359,7 +357,7 @@ final class FloatingPanelController: NSWindowController {
 
         updateOverlayPositions()
         updateAxisFrame()
-        axisPanel.orderFrontRegardless()
+        refreshWindowLevels()
         refreshTaskPanelKeyFocus()
     }
 
@@ -569,7 +567,7 @@ final class FloatingPanelController: NSWindowController {
 
     private func scrollTimeline(with event: NSEvent) {
         registerTimelineInteraction()
-        panel.contentView?.firstDescendant(of: NSScrollView.self)?.scrollWheel(with: event)
+        timelineScrollView()?.scrollWheel(with: event)
     }
 
     private func configureAutoReturn(mode: AutoReturnMode) {
@@ -605,7 +603,7 @@ final class FloatingPanelController: NSWindowController {
     private func scrollAutoReturnTargetToAnchor() {
         guard store.isExpanded,
               let timelineProjection,
-              let scrollView = panel.contentView?.firstDescendant(of: NSScrollView.self),
+              let scrollView = timelineScrollView(),
               let targetMinute = autoReturnTargetMinute()
         else { return }
 
@@ -628,6 +626,15 @@ final class FloatingPanelController: NSWindowController {
         )
         clipView.scroll(to: target)
         scrollView.reflectScrolledClipView(clipView)
+    }
+
+    private func timelineScrollView() -> NSScrollView? {
+        let scrollView = cachedTimelineScrollView
+            ?? panel.contentView?.firstDescendant(of: NSScrollView.self)
+        scrollView?.hasVerticalScroller = false
+        scrollView?.hasHorizontalScroller = false
+        cachedTimelineScrollView = scrollView
+        return scrollView
     }
 
     private func autoReturnTargetMinute() -> Double? {
@@ -737,7 +744,7 @@ final class FloatingPanelController: NSWindowController {
 
     private func setPanelFrame(_ frame: NSRect) {
         panel.setFrame(frame, display: true)
-        reconcileOverlaysSoon()
+        scheduleOverlayUpdate(reconcile: true)
     }
 
     private func verticalPlacement(

@@ -39,16 +39,16 @@ struct RootView: View {
         SideRail(
             store: store,
             onHandleClick: {
-                commitEditing()
+                store.commitEditing()
                 onHandleClick()
             },
             onHandleDragChanged: onHandleDragChanged,
             onHandleDragEnded: { point in
-                commitEditing()
+                store.commitEditing()
                 onHandleDragEnded(point)
             },
             onSettingsPresented: onSettingsPresented,
-            onBeforeAction: commitEditing,
+            onBeforeAction: store.commitEditing,
             onAdd: addTask
         )
         .frame(width: DaylineLayout.controlSize)
@@ -87,9 +87,6 @@ struct RootView: View {
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
-    private func commitEditing() {
-        store.commitEditing()
-    }
 }
 
 private struct SideRail: View {
@@ -203,67 +200,40 @@ private struct SettingsPopover: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 7) {
-                Text("标题占高").font(.caption).foregroundStyle(.secondary)
-                HStack(spacing: 9) {
-                    Slider(
-                        value: $store.titleHeightRatio,
-                        in: DaylineLayout.titleHeightRatioRange,
-                        step: 0.01
-                    )
-                    .controlSize(.small)
-                    Text("\(Int((store.titleHeightRatio * 100).rounded()))%")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 34, alignment: .trailing)
-                }
-            }
+            sliderSetting(
+                "标题占高",
+                value: $store.titleHeightRatio,
+                in: DaylineLayout.titleHeightRatioRange,
+                step: 0.01,
+                text: "\(Int((store.titleHeightRatio * 100).rounded()))%"
+            )
 
-            VStack(alignment: .leading, spacing: 7) {
-                Text("标题最大宽度").font(.caption).foregroundStyle(.secondary)
-                HStack(spacing: 9) {
-                    Slider(
-                        value: $store.compactTitleWidth,
-                        in: DaylineLayout.compactTitleWidthRange,
-                        step: 4
-                    )
-                    .controlSize(.small)
-                    .accessibilityLabel("默认标题最大宽度")
-                    Text("\(Int(store.compactTitleWidth.rounded()))")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, alignment: .trailing)
-                }
-            }
+            sliderSetting(
+                "标题最大宽度",
+                value: $store.compactTitleWidth,
+                in: DaylineLayout.compactTitleWidthRange,
+                step: 4,
+                text: "\(Int(store.compactTitleWidth.rounded()))",
+                textWidth: 28,
+                accessibilityLabel: "默认标题最大宽度"
+            )
 
-            VStack(alignment: .leading, spacing: 7) {
-                Text("时间轴高度").font(.caption).foregroundStyle(.secondary)
-                HStack(spacing: 9) {
-                    Slider(value: $store.panelHeightRatio, in: 0.6...1, step: 0.05)
-                        .controlSize(.small)
-                    Text("\(Int((store.panelHeightRatio * 100).rounded()))%")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 34, alignment: .trailing)
-                }
-            }
+            sliderSetting(
+                "时间轴高度",
+                value: $store.panelHeightRatio,
+                in: 0.6...1,
+                step: 0.05,
+                text: "\(Int((store.panelHeightRatio * 100).rounded()))%"
+            )
 
-            VStack(alignment: .leading, spacing: 7) {
-                Text("时间轴停靠位置").font(.caption).foregroundStyle(.secondary)
-                HStack(spacing: 9) {
-                    Slider(
-                        value: $store.timelineAnchorPosition,
-                        in: DaylineLayout.timelineAnchorPositionRange,
-                        step: 0.01
-                    )
-                    .controlSize(.small)
-                    .accessibilityLabel("时间轴停靠位置，从底部向上")
-                    Text("\(Int((store.timelineAnchorPosition * 100).rounded()))%")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 34, alignment: .trailing)
-                }
-            }
+            sliderSetting(
+                "时间轴停靠位置",
+                value: $store.timelineAnchorPosition,
+                in: DaylineLayout.timelineAnchorPositionRange,
+                step: 0.01,
+                text: "\(Int((store.timelineAnchorPosition * 100).rounded()))%",
+                accessibilityLabel: "时间轴停靠位置，从底部向上"
+            )
 
             VStack(alignment: .leading, spacing: 7) {
                 Text("无操作后").font(.caption).foregroundStyle(.secondary)
@@ -297,21 +267,13 @@ private struct SettingsPopover: View {
                 .opacity(store.autoReturnMode == .off ? 0.45 : 1)
             }
 
-            VStack(alignment: .leading, spacing: 7) {
-                Text("单双击保护时间").font(.caption).foregroundStyle(.secondary)
-                HStack(spacing: 9) {
-                    Slider(
-                        value: $store.clickGuardDuration,
-                        in: TimelineStore.clickGuardDurationRange,
-                        step: 0.05
-                    )
-                    .controlSize(.small)
-                    Text(String(format: "%.2f s", store.clickGuardDuration))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 42, alignment: .trailing)
-                }
-            }
+            sliderSetting(
+                "单双击保护时间",
+                value: $store.clickGuardDuration,
+                in: TimelineStore.clickGuardDurationRange,
+                step: 0.05,
+                text: String(format: "%.2f s", store.clickGuardDuration)
+            )
 
             Picker("玻璃材质", selection: $store.nativeGlassStyle) {
                 Text("Regular").tag(NativeGlassStyle.regular)
@@ -379,6 +341,29 @@ private struct SettingsPopover: View {
         }
         .padding(16)
         .frame(width: 238)
+    }
+
+    private func sliderSetting(
+        _ title: String,
+        value: Binding<Double>,
+        in range: ClosedRange<Double>,
+        step: Double,
+        text: String,
+        textWidth: CGFloat = 42,
+        accessibilityLabel: String? = nil
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 9) {
+                Slider(value: value, in: range, step: step)
+                    .controlSize(.small)
+                    .accessibilityLabel(accessibilityLabel ?? title)
+                Text(text)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: textWidth, alignment: .trailing)
+            }
+        }
     }
 
     private var autoReturnDescription: String {
