@@ -111,7 +111,7 @@ final class ControlRailGeometryTests: XCTestCase {
                 minute: 12 * 60,
                 referenceMinute: 12 * 60,
                 referenceCenterY: anchorY,
-                fontSize: fontSize
+                slotHeight: slotHeight
             ),
             anchorY,
             accuracy: 0.001
@@ -121,7 +121,7 @@ final class ControlRailGeometryTests: XCTestCase {
                 minute: 12 * 60 + 15,
                 referenceMinute: 12 * 60,
                 referenceCenterY: anchorY,
-                fontSize: fontSize
+                slotHeight: slotHeight
             ),
             anchorY + slotHeight,
             accuracy: 0.001
@@ -131,9 +131,25 @@ final class ControlRailGeometryTests: XCTestCase {
                 minute: 12 * 60 - 15,
                 referenceMinute: 12 * 60,
                 referenceCenterY: anchorY,
-                fontSize: fontSize
+                slotHeight: slotHeight
             ),
             anchorY - slotHeight,
+            accuracy: 0.001
+        )
+    }
+
+    func testMeasuredProjectionKeepsItsMatchingSizeScale() {
+        let fontSize = 16.0
+        let slotHeight = DaylineLayout.slotHeight(for: fontSize)
+        let projection = TimelineProjection(
+            firstMinute: 7 * 60,
+            firstCenterY: -240,
+            fontSize: fontSize
+        )
+
+        XCTAssertEqual(
+            projection.centerY(for: 8 * 60),
+            -240 + slotHeight * 4,
             accuracy: 0.001
         )
     }

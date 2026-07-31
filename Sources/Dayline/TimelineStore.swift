@@ -2,9 +2,11 @@ import Combine
 import Foundation
 
 @MainActor
-final class TodayStore: ObservableObject {
+final class TimelineStore: ObservableObject {
     static let defaultClickGuardDuration = 0.25
     static let clickGuardDurationRange = 0.0...0.6
+    static let defaultAutoReturnDelay = 30.0
+    static let autoReturnDelayRange = 5.0...300.0
 
     @Published var items: [TodoItem] = [] { didSet { saveWhenReady() } }
     @Published var fontSize: Double = 16 { didSet { saveWhenReady() } }
@@ -19,8 +21,11 @@ final class TodayStore: ObservableObject {
         didSet { saveWhenReady() }
     }
     @Published var nativeGlassStyle: NativeGlassStyle = .regular { didSet { saveWhenReady() } }
+    @Published var timeDisplayMode: TimeDisplayMode = .absolute { didSet { saveWhenReady() } }
     @Published var pinsOnlyCurrentTask = false { didSet { saveWhenReady() } }
     @Published var clickGuardDuration = defaultClickGuardDuration { didSet { saveWhenReady() } }
+    @Published var autoReturnMode: AutoReturnMode = .off { didSet { saveWhenReady() } }
+    @Published var autoReturnDelay = defaultAutoReturnDelay { didSet { saveWhenReady() } }
     @Published var dockEdge: DockEdge = .left { didSet { saveWhenReady() } }
     @Published var dockY: Double = 0.52 { didSet { saveWhenReady() } }
     @Published var isExpanded = true { didSet { saveWhenReady() } }
@@ -34,29 +39,25 @@ final class TodayStore: ObservableObject {
     @Published private(set) var clockDate = Date()
 
     private(set) var hasSavedPlacement = false
-    private var currentDayKey = ""
     private var isLoading = true
-    private var rolloverTimer: Timer?
+    private var clockTimer: Timer?
     private let stateURL: URL
 
     init(stateURL: URL? = nil, startsTimer: Bool = true) {
         self.stateURL = stateURL ?? Self.defaultStateURL
         restore()
         isLoading = false
-        rolloverIfNeeded()
         if startsTimer {
-            rolloverTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) {
+            clockTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) {
                 [weak self] _ in
                 Task { @MainActor in
-                    let now = Date()
-                    self?.rolloverIfNeeded(now: now)
-                    self?.clockDate = now
+                    self?.clockDate = Date()
                 }
             }
         }
     }
 
-    deinit { rolloverTimer?.invalidate() }
+    deinit { clockTimer?.invalidate() }
 
     @discardableResult
     func addTask(
@@ -64,7 +65,6 @@ final class TodayStore: ObservableObject {
         title: String = "",
         at minute: Int? = nil
     ) -> UUID {
-        rolloverIfNeeded()
         guard item(id: id) == nil else { return id }
         let preferred = minute ?? DayClock.defaultTaskMinute(
             start: timelineStartMinute,
@@ -85,10 +85,10 @@ final class TodayStore: ObservableObject {
     }
 
     func currentTask(at minute: Int) -> TodoItem? {
-        items.sorted {
+        let active = items.filter { !$0.isCompleted }.sorted {
             $0.minute == $1.minute ? $0.createdAt < $1.createdAt : $0.minute < $1.minute
         }
-        .first { !$0.isCompleted && $0.minute >= minute }
+        return active.first { $0.minute >= minute } ?? active.first
     }
 
     func updateTitle(id: UUID, title: String) {
@@ -148,14 +148,22 @@ final class TodayStore: ObservableObject {
     }
 
     func setTimelineStart(_ minute: Int) {
-        timelineStartMinute = min(max(0, minute), timelineEndMinute - 60)
-        clampItemsToRange()
+        setTimelineRange(
+            start: min(max(0, minute), timelineEndMinute - 60),
+            end: timelineEndMinute
+        )
     }
 
     func setTimelineEnd(_ minute: Int) {
-        let end = min(max(minute, timelineStartMinute + 60), 30 * 60)
-        currentDayKey = DayClock.dayKey(dayEndMinute: end)
-        timelineEndMinute = end
+        setTimelineRange(
+            start: timelineStartMinute,
+            end: min(max(minute, timelineStartMinute + 60), 30 * 60)
+        )
+    }
+
+    func setTimelineRange(start: Int, end: Int) {
+        timelineStartMinute = min(max(start, 0), 23 * 60)
+        timelineEndMinute = min(max(end, timelineStartMinute + 60), 30 * 60)
         clampItemsToRange()
     }
 
@@ -166,16 +174,8 @@ final class TodayStore: ObservableObject {
         hasSavedPlacement = true
     }
 
-    func rolloverIfNeeded(now: Date = Date()) {
-        let key = DayClock.dayKey(for: now, dayEndMinute: timelineEndMinute)
-        guard key != currentDayKey else { return }
-        currentDayKey = key
-        items = []
-    }
-
     func persist() {
         let snapshot = SavedState(
-            dayKey: currentDayKey,
             items: items,
             fontSize: fontSize,
             titleHeightRatio: titleHeightRatio,
@@ -189,7 +189,10 @@ final class TodayStore: ObservableObject {
             compactTitleWidth: compactTitleWidth,
             nativeGlassStyle: nativeGlassStyle,
             pinsOnlyCurrentTask: pinsOnlyCurrentTask,
-            clickGuardDuration: clickGuardDuration
+            clickGuardDuration: clickGuardDuration,
+            timeDisplayMode: timeDisplayMode,
+            autoReturnMode: autoReturnMode,
+            autoReturnDelay: autoReturnDelay
         )
         do {
             try FileManager.default.createDirectory(
@@ -242,12 +245,16 @@ final class TodayStore: ObservableObject {
     }
 
     private func restore() {
+        guard FileManager.default.fileExists(atPath: stateURL.path) else { return }
         do {
             let saved = try JSONDecoder.dayline.decode(
                 SavedState.self,
                 from: Data(contentsOf: stateURL)
             )
-            fontSize = min(max(saved.fontSize, 13), 19)
+            fontSize = min(
+                max(saved.fontSize, DaylineLayout.fontSizeRange.lowerBound),
+                DaylineLayout.fontSizeRange.upperBound
+            )
             titleHeightRatio = min(
                 max(
                     saved.titleHeightRatio ?? DaylineLayout.defaultTitleHeightRatio,
@@ -269,6 +276,7 @@ final class TodayStore: ObservableObject {
                 DaylineLayout.timelineAnchorPositionRange.upperBound
             )
             nativeGlassStyle = saved.nativeGlassStyle ?? .regular
+            timeDisplayMode = saved.timeDisplayMode ?? .absolute
             pinsOnlyCurrentTask = saved.pinsOnlyCurrentTask ?? false
             clickGuardDuration = min(
                 max(
@@ -276,6 +284,15 @@ final class TodayStore: ObservableObject {
                     Self.clickGuardDurationRange.lowerBound
                 ),
                 Self.clickGuardDurationRange.upperBound
+            )
+            autoReturnMode = saved.autoReturnMode
+                ?? ((saved.autoReturnToCurrentTime ?? false) ? .currentTime : .off)
+            autoReturnDelay = min(
+                max(
+                    saved.autoReturnDelay ?? Self.defaultAutoReturnDelay,
+                    Self.autoReturnDelayRange.lowerBound
+                ),
+                Self.autoReturnDelayRange.upperBound
             )
             dockEdge = saved.dockEdge
             dockY = min(max(saved.dockY, 0.08), 0.92)
@@ -286,8 +303,6 @@ final class TodayStore: ObservableObject {
                 30 * 60
             )
             hasSavedPlacement = true
-            currentDayKey = DayClock.dayKey(dayEndMinute: timelineEndMinute)
-            guard saved.dayKey == currentDayKey else { return }
             items = saved.items.map { item in
                 TodoItem(
                     id: item.id,
@@ -303,7 +318,7 @@ final class TodayStore: ObservableObject {
                 )
             }
         } catch {
-            currentDayKey = DayClock.dayKey(dayEndMinute: timelineEndMinute)
+            NSLog("Dayline restore failed: \(error.localizedDescription)")
         }
     }
 
@@ -314,7 +329,7 @@ final class TodayStore: ObservableObject {
     private static var defaultStateURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Dayline", isDirectory: true)
-            .appendingPathComponent("today.json")
+            .appendingPathComponent("timeline.json")
     }
 }
 

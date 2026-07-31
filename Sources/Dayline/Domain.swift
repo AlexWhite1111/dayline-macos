@@ -10,6 +10,17 @@ enum NativeGlassStyle: String, Codable {
     case clear
 }
 
+enum TimeDisplayMode: String, Codable {
+    case absolute
+    case remaining
+}
+
+enum AutoReturnMode: String, Codable {
+    case off
+    case currentTime
+    case firstTodo
+}
+
 struct TodoItem: Identifiable, Codable {
     let id: UUID
     var title: String
@@ -50,7 +61,6 @@ struct TodoItem: Identifiable, Codable {
 }
 
 struct SavedState: Codable {
-    var dayKey: String
     var items: [TodoItem]
     var fontSize: Double
     var titleHeightRatio: Double? = nil
@@ -65,6 +75,11 @@ struct SavedState: Codable {
     var nativeGlassStyle: NativeGlassStyle? = nil
     var pinsOnlyCurrentTask: Bool? = nil
     var clickGuardDuration: Double? = nil
+    var timeDisplayMode: TimeDisplayMode? = nil
+    var autoReturnMode: AutoReturnMode? = nil
+    // Build 49 and earlier migration input. New saves leave this absent.
+    var autoReturnToCurrentTime: Bool? = nil
+    var autoReturnDelay: Double? = nil
 }
 
 enum DayClock {
@@ -72,24 +87,22 @@ enum DayClock {
     static let endMinute = 25 * 60
     static let lastTaskMinute = endMinute - 15
 
-    static func dayKey(for date: Date = Date(), dayEndMinute: Int = endMinute) -> String {
-        let calendar = Calendar.autoupdatingCurrent
-        let overflow = max(0, dayEndMinute - 24 * 60)
-        let shifted = calendar.date(byAdding: .minute, value: -overflow, to: date) ?? date
-        let parts = calendar.dateComponents([.year, .month, .day], from: shifted)
-        return String(
-            format: "%04d-%02d-%02d",
-            parts.year ?? 0,
-            parts.month ?? 0,
-            parts.day ?? 0
-        )
+    static func minuteOfDay(for date: Date = Date(), dayEndMinute: Int = endMinute) -> Int {
+        Int(minuteOfDayFraction(for: date, dayEndMinute: dayEndMinute))
     }
 
-    static func minuteOfDay(for date: Date = Date(), dayEndMinute: Int = endMinute) -> Int {
-        let parts = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: date)
-        let minute = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+    static func minuteOfDayFraction(
+        for date: Date = Date(),
+        dayEndMinute: Int = endMinute
+    ) -> Double {
+        let parts = Calendar.autoupdatingCurrent.dateComponents(
+            [.hour, .minute, .second],
+            from: date
+        )
+        let minute = Double((parts.hour ?? 0) * 60 + (parts.minute ?? 0))
+            + Double(parts.second ?? 0) / 60
         let overflow = max(0, dayEndMinute - 24 * 60)
-        return minute < overflow ? minute + 24 * 60 : minute
+        return minute < Double(overflow) ? minute + 24 * 60 : minute
     }
 
     static func defaultTaskMinute(
@@ -124,6 +137,14 @@ enum DayClock {
         min(max(minute, start), end - 15)
     }
 
+    static func clamp(
+        _ minute: Double,
+        start: Int = startMinute,
+        end: Int = endMinute
+    ) -> Double {
+        min(max(minute, Double(start)), Double(end - 15))
+    }
+
     static func displayTime(_ minute: Int) -> String {
         let safeMinute = max(0, minute)
         return String(format: "%02d:%02d", (safeMinute / 60) % 24, safeMinute % 60)
@@ -131,6 +152,18 @@ enum DayClock {
 
     static func displayRangeTime(_ minute: Int) -> String {
         (minute >= 24 * 60 ? "次日 " : "") + displayTime(minute)
+    }
+
+    /// 相对于当前时刻的剩余时间，格式 `H:MM`；已过时刻显示负号，如 `-0:15`。
+    static func displayRemaining(taskMinute: Int, currentMinute: Int) -> String {
+        let delta = taskMinute - currentMinute
+        let magnitude = abs(delta)
+        return String(
+            format: "%@%d:%02d",
+            delta < 0 ? "-" : "",
+            magnitude / 60,
+            magnitude % 60
+        )
     }
 }
 
@@ -150,6 +183,7 @@ enum DaylineLayout {
     static let pillDeleteWidth: CGFloat = 14
     static let currentTimeButtonHitSize: CGFloat = 24
     static let defaultCompactTitleWidth: CGFloat = 112
+    static let fontSizeRange: ClosedRange<Double> = 7...19
     static let compactTitleWidthRange: ClosedRange<Double> = 80...300
     static let defaultTitleHeightRatio = 0.44
     static let titleHeightRatioRange: ClosedRange<Double> = 0.4...0.75
@@ -168,13 +202,6 @@ enum DaylineLayout {
         compactPanelWidth + max(0, titleWidth - defaultCompactTitleWidth)
     }
 
-    static func compactTimelineWidth(for titleWidth: CGFloat) -> CGFloat {
-        compactPanelWidth(for: titleWidth)
-            - panelHorizontalPadding * 2
-            - controlSize
-            - railSpacing
-    }
-
     static func titleFontSize(for fontSize: Double, heightRatio: Double) -> CGFloat {
         pillHeight(for: fontSize) * CGFloat(heightRatio) / songtiInkToPointSizeRatio
     }
@@ -184,7 +211,7 @@ enum DaylineLayout {
         fontSize: Double,
         titleHeightRatio: Double
     ) -> CGFloat {
-        let value = title.isEmpty ? "今天要做什么？" : title
+        let value = title.isEmpty ? "要做什么？" : title
         let size = titleFontSize(for: fontSize, heightRatio: titleHeightRatio)
         let font = NSFont(name: "Songti SC", size: size) ?? NSFont.systemFont(ofSize: size)
         return ceil((value as NSString).size(withAttributes: [.font: font]).width) + 3
@@ -234,10 +261,24 @@ enum DaylineLayout {
         minute: Int,
         referenceMinute: Int,
         referenceCenterY: CGFloat,
-        fontSize: Double
+        slotHeight: CGFloat
+    ) -> CGFloat {
+        timelineCenterY(
+            minute: Double(minute),
+            referenceMinute: Double(referenceMinute),
+            referenceCenterY: referenceCenterY,
+            slotHeight: slotHeight
+        )
+    }
+
+    static func timelineCenterY(
+        minute: Double,
+        referenceMinute: Double,
+        referenceCenterY: CGFloat,
+        slotHeight: CGFloat
     ) -> CGFloat {
         referenceCenterY
-            + CGFloat(minute - referenceMinute) / 15 * slotHeight(for: fontSize)
+            + CGFloat(minute - referenceMinute) / 15 * slotHeight
     }
 
     static func timelineEdgeOpacity(
@@ -260,6 +301,25 @@ enum DaylineLayout {
         return min(
             availableHeight,
             max(480, availableHeight * safeRatio)
+        )
+    }
+}
+
+struct TimelineProjection: Equatable {
+    let firstMinute: Int
+    let firstCenterY: CGFloat
+    let fontSize: Double
+
+    func centerY(for minute: Int) -> CGFloat {
+        centerY(for: Double(minute))
+    }
+
+    func centerY(for minute: Double) -> CGFloat {
+        DaylineLayout.timelineCenterY(
+            minute: minute,
+            referenceMinute: Double(firstMinute),
+            referenceCenterY: firstCenterY,
+            slotHeight: DaylineLayout.slotHeight(for: fontSize)
         )
     }
 }

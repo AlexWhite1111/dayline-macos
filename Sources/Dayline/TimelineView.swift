@@ -1,20 +1,23 @@
 import SwiftUI
 
 struct TimelineView: View {
-    @ObservedObject var store: TodayStore
+    @ObservedObject var store: TimelineStore
     @Binding var focusMinute: Int?
-    let onFirstSlotCenterChanged: (CGFloat) -> Void
+    let onProjectionChanged: (TimelineProjection) -> Void
+    let onUserScrollActivity: () -> Void
+    @State private var userScrollIsActive = false
 
     var body: some View {
         GeometryReader { geometry in
-            let fadeDistance = DaylineLayout.timelineFadeDistance(for: store.fontSize)
-            let slotHeight = DaylineLayout.slotHeight(for: store.fontSize)
+            let fontSize = store.fontSize
+            let fadeDistance = DaylineLayout.timelineFadeDistance(for: fontSize)
+            let slotHeight = DaylineLayout.slotHeight(for: fontSize)
             let viewportAnchor = DaylineLayout.timelineViewportAnchor(
                 position: store.timelineAnchorPosition
             )
             let anchorY = DaylineLayout.timelineAnchorCenterY(
                 viewportHeight: geometry.size.height,
-                fontSize: store.fontSize,
+                fontSize: fontSize,
                 position: store.timelineAnchorPosition
             )
             let topInset = max(0, (geometry.size.height - slotHeight) * viewportAnchor)
@@ -42,7 +45,7 @@ struct TimelineView: View {
                 minute: currentMinute,
                 referenceMinute: anchor,
                 referenceCenterY: anchorY,
-                fontSize: store.fontSize
+                slotHeight: slotHeight
             )
             let currentIsAbove = currentScreenY < -3
             let currentIsBelow = currentScreenY > geometry.size.height + 3
@@ -78,14 +81,34 @@ struct TimelineView: View {
                     anchor: UnitPoint(x: 0.5, y: viewportAnchor)
                 )
                 .onScrollGeometryChange(
-                    for: CGFloat.self,
+                    for: TimelineProjection.self,
                     of: { scrollGeometry in
-                        topInset + slotHeight / 2 - scrollGeometry.contentOffset.y
+                        TimelineProjection(
+                            firstMinute: store.timelineStartMinute,
+                            firstCenterY: topInset + slotHeight / 2
+                                - scrollGeometry.contentOffset.y,
+                            fontSize: fontSize
+                        )
                     },
-                    action: { _, firstSlotCenterY in
-                        onFirstSlotCenterChanged(firstSlotCenterY)
+                    action: { _, projection in
+                        onProjectionChanged(projection)
                     }
                 )
+                .onScrollPhaseChange { _, phase in
+                    switch phase {
+                    case .tracking, .interacting, .decelerating:
+                        userScrollIsActive = true
+                        onUserScrollActivity()
+                    case .idle:
+                        guard userScrollIsActive else { return }
+                        userScrollIsActive = false
+                        onUserScrollActivity()
+                    case .animating:
+                        break
+                    @unknown default:
+                        break
+                    }
+                }
                 .mask(edgeFade(height: geometry.size.height, distance: fadeDistance))
                 .accessibilityIdentifier("dayline.timeline")
                 .accessibilityValue(focusMinute.map(DayClock.displayTime) ?? "")

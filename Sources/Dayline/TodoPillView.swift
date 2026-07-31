@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct TodoPillView: View {
-    @ObservedObject var store: TodayStore
+    @ObservedObject var store: TimelineStore
     let item: TodoItem
     let onDragBegan: (CGFloat) -> Void
     let onDragChanged: () -> Int?
@@ -40,6 +40,20 @@ struct TodoPillView: View {
         )?.id == item.id
     }
     private var visibleMinute: Int { previewMinute ?? currentItem.minute }
+    private var timeLabel: String {
+        switch store.timeDisplayMode {
+        case .absolute:
+            return DayClock.displayTime(visibleMinute)
+        case .remaining:
+            return DayClock.displayRemaining(
+                taskMinute: visibleMinute,
+                currentMinute: DayClock.minuteOfDay(
+                    for: store.clockDate,
+                    dayEndMinute: store.timelineEndMinute
+                )
+            )
+        }
+    }
     private var pillHeight: CGFloat { DaylineLayout.pillHeight(for: store.fontSize) }
     private var compactTitleWidth: CGFloat { CGFloat(store.compactTitleWidth) }
     private var naturalTitleWidth: CGFloat {
@@ -179,7 +193,7 @@ struct TodoPillView: View {
 
     private var title: some View {
         ZStack(alignment: .leading) {
-            Text(currentItem.title.isEmpty ? "今天要做什么？" : currentItem.title)
+            Text(currentItem.title.isEmpty ? "要做什么？" : currentItem.title)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(width: displayedTitleWidth, alignment: .leading)
@@ -190,7 +204,7 @@ struct TodoPillView: View {
                 .accessibilityHidden(isEditing)
                 .onTapGesture(count: 2, perform: beginEditing)
 
-            TextField("今天要做什么？", text: titleBinding)
+            TextField("要做什么？", text: titleBinding)
                 .textFieldStyle(.plain)
                 .focused($titleIsFocused)
                 .onSubmit(commitEditing)
@@ -220,40 +234,39 @@ struct TodoPillView: View {
     }
 
     private var timeMenu: some View {
-        Menu {
-            ForEach(
-                Array(stride(from: store.timelineStartMinute, through: store.timelineEndMinute - 15, by: 15)),
-                id: \.self
-            ) { minute in
-                Button {
-                    performAfterCommittingEdit { store.move(id: item.id, to: minute) }
-                } label: {
-                    if minute == currentItem.minute {
-                        Label(DayClock.displayTime(minute), systemImage: "checkmark")
-                    } else {
-                        Text(DayClock.displayTime(minute))
-                    }
-                }
-            }
-        } label: {
-            Text(DayClock.displayTime(visibleMinute))
-                .font(
-                    .system(
-                        size: min(max(store.fontSize - 3, 10.5), 12),
-                        weight: .semibold,
-                        design: .rounded
-                    )
-                    .monospacedDigit()
+        Text(timeLabel)
+            .font(
+                .system(
+                    size: min(max(store.fontSize - 3, 10.5), 12),
+                    weight: .semibold,
+                    design: .rounded
                 )
-                .foregroundStyle(timeColor)
-                .frame(width: Metrics.timeWidth)
-                .padding(.vertical, 1)
-                .contentShape(Capsule())
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel("时间 \(DayClock.displayTime(visibleMinute))")
+                .monospacedDigit()
+            )
+            .foregroundStyle(timeColor)
+            .frame(width: Metrics.timeWidth)
+            .padding(.vertical, 1)
+            .contentShape(Capsule())
+            .overlay {
+                TimeMenuInteraction(
+                    startMinute: store.timelineStartMinute,
+                    endMinute: store.timelineEndMinute,
+                    selectedMinute: currentItem.minute,
+                    clickGuardDuration: store.clickGuardDuration,
+                    onSelectMinute: { minute in
+                        performAfterCommittingEdit { store.move(id: item.id, to: minute) }
+                    },
+                    onDoubleClick: {
+                        performAfterCommittingEdit {
+                            store.timeDisplayMode = store.timeDisplayMode == .absolute
+                                ? .remaining
+                                : .absolute
+                        }
+                    }
+                )
+            }
+            .fixedSize()
+            .accessibilityLabel("时间 \(timeLabel)")
     }
 
     private var titleBinding: Binding<String> {
@@ -315,5 +328,74 @@ struct TodoPillView: View {
     private func performAfterCommittingEdit(_ action: () -> Void) {
         store.commitEditing()
         action()
+    }
+}
+
+private struct TimeMenuInteraction: NSViewRepresentable {
+    let startMinute: Int
+    let endMinute: Int
+    let selectedMinute: Int
+    let clickGuardDuration: TimeInterval
+    let onSelectMinute: (Int) -> Void
+    let onDoubleClick: () -> Void
+
+    func makeNSView(context: Context) -> InteractionView {
+        InteractionView()
+    }
+
+    func updateNSView(_ view: InteractionView, context: Context) {
+        view.startMinute = startMinute
+        view.endMinute = endMinute
+        view.selectedMinute = selectedMinute
+        view.clickGuardDuration = clickGuardDuration
+        view.onSelectMinute = onSelectMinute
+        view.onDoubleClick = onDoubleClick
+    }
+
+    final class InteractionView: NSView {
+        var startMinute = DayClock.startMinute
+        var endMinute = DayClock.endMinute
+        var selectedMinute = DayClock.startMinute
+        var clickGuardDuration = TimelineStore.defaultClickGuardDuration
+        var onSelectMinute: ((Int) -> Void)?
+        var onDoubleClick: (() -> Void)?
+        private let clickArbiter = GuardedClickArbiter()
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func mouseUp(with event: NSEvent) {
+            let anchor = convert(event.locationInWindow, from: nil)
+            clickArbiter.resolve(
+                clickCount: event.clickCount,
+                delay: max(0, clickGuardDuration),
+                singleClick: { [weak self] in self?.presentMenu(at: anchor) },
+                doubleClick: { [weak self] in self?.onDoubleClick?() }
+            )
+        }
+
+        @objc private func selectMinute(_ sender: NSMenuItem) {
+            onSelectMinute?(sender.tag)
+        }
+
+        private func presentMenu(at anchor: NSPoint) {
+            guard window != nil else { return }
+            let menu = NSMenu()
+            menu.autoenablesItems = false
+            var selectedItem: NSMenuItem?
+            for minute in stride(from: startMinute, through: endMinute - 15, by: 15) {
+                let item = NSMenuItem(
+                    title: DayClock.displayTime(minute),
+                    action: #selector(selectMinute(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.tag = minute
+                item.state = minute == selectedMinute ? .on : .off
+                if item.state == .on { selectedItem = item }
+                menu.addItem(item)
+            }
+            menu.popUp(positioning: selectedItem, at: anchor, in: self)
+        }
     }
 }

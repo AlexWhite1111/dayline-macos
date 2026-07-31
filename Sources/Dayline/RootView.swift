@@ -3,12 +3,13 @@ import ServiceManagement
 import SwiftUI
 
 struct RootView: View {
-    @ObservedObject var store: TodayStore
+    @ObservedObject var store: TimelineStore
     let onHandleClick: () -> Void
     let onHandleDragChanged: (NSPoint) -> Void
     let onHandleDragEnded: (NSPoint) -> Void
     let onSettingsPresented: (Bool) -> Void
-    let onTimelineFirstSlotCenterChanged: (CGFloat) -> Void
+    let onTimelineProjectionChanged: (TimelineProjection) -> Void
+    let onTimelineScrollActivity: () -> Void
 
     var body: some View {
         Group {
@@ -58,7 +59,8 @@ struct RootView: View {
         TimelineView(
             store: store,
             focusMinute: $store.focusMinute,
-            onFirstSlotCenterChanged: onTimelineFirstSlotCenterChanged
+            onProjectionChanged: onTimelineProjectionChanged,
+            onUserScrollActivity: onTimelineScrollActivity
         )
     }
 
@@ -91,7 +93,7 @@ struct RootView: View {
 }
 
 private struct SideRail: View {
-    @ObservedObject var store: TodayStore
+    @ObservedObject var store: TimelineStore
     let onHandleClick: () -> Void
     let onHandleDragChanged: (NSPoint) -> Void
     let onHandleDragEnded: (NSPoint) -> Void
@@ -111,7 +113,7 @@ private struct SideRail: View {
             )
 
             if store.isExpanded {
-                sideButton("plus", label: "添加今天的待办") {
+                sideButton("plus", label: "添加待办") {
                     onBeforeAction()
                     onAdd()
                 }
@@ -154,7 +156,7 @@ private struct SideRail: View {
 }
 
 private struct EdgeHandle: View {
-    @ObservedObject var store: TodayStore
+    @ObservedObject var store: TimelineStore
     let onClick: () -> Void
     let onDragChanged: (NSPoint) -> Void
     let onDragEnded: (NSPoint) -> Void
@@ -177,25 +179,25 @@ private struct EdgeHandle: View {
                 )
             }
             .help("点击收放 · 拖动停靠")
-            .accessibilityLabel("今日还有 \(pendingCount) 项待办，点击收放，拖动改变位置")
+            .accessibilityLabel("时间轴还有 \(pendingCount) 项待办，点击收放，拖动改变位置")
     }
 }
 
 private struct SettingsPopover: View {
-    @ObservedObject var store: TodayStore
+    @ObservedObject var store: TimelineStore
     @State private var launchAtLoginStatus = SMAppService.mainApp.status
     @State private var launchAtLoginError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("今天")
+            Text("时间轴")
                 .font(.custom("Songti SC", fixedSize: 18).weight(.semibold))
 
             VStack(alignment: .leading, spacing: 7) {
                 Text("尺寸").font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 9) {
                     Text("A").font(.system(size: 11, weight: .medium))
-                    Slider(value: $store.fontSize, in: 13...19, step: 0.5)
+                    Slider(value: $store.fontSize, in: DaylineLayout.fontSizeRange, step: 0.5)
                         .controlSize(.small)
                     Text("A").font(.system(size: 18, weight: .medium))
                 }
@@ -264,11 +266,43 @@ private struct SettingsPopover: View {
             }
 
             VStack(alignment: .leading, spacing: 7) {
+                Text("无操作后").font(.caption).foregroundStyle(.secondary)
+
+                Picker("无操作后", selection: $store.autoReturnMode) {
+                    Text("保持原位").tag(AutoReturnMode.off)
+                    Text("回到现在").tag(AutoReturnMode.currentTime)
+                    Text("首项任务").tag(AutoReturnMode.firstTodo)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                Text(autoReturnDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 9) {
+                    Slider(
+                        value: $store.autoReturnDelay,
+                        in: TimelineStore.autoReturnDelayRange,
+                        step: 5
+                    )
+                    .controlSize(.small)
+                    .accessibilityLabel("无操作后的等待秒数")
+                    Text("\(Int(store.autoReturnDelay.rounded())) 秒")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 42, alignment: .trailing)
+                }
+                .disabled(store.autoReturnMode == .off)
+                .opacity(store.autoReturnMode == .off ? 0.45 : 1)
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
                 Text("单双击保护时间").font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 9) {
                     Slider(
                         value: $store.clickGuardDuration,
-                        in: TodayStore.clickGuardDurationRange,
+                        in: TimelineStore.clickGuardDurationRange,
                         step: 0.05
                     )
                     .controlSize(.small)
@@ -285,6 +319,16 @@ private struct SettingsPopover: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("时间显示").font(.caption).foregroundStyle(.secondary)
+                Picker("时间显示", selection: $store.timeDisplayMode) {
+                    Text("时刻").tag(TimeDisplayMode.absolute)
+                    Text("剩余").tag(TimeDisplayMode.remaining)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Toggle("开机自动启动", isOn: launchAtLoginBinding)
@@ -322,7 +366,7 @@ private struct SettingsPopover: View {
                 .labelsHidden()
             }
 
-            Text("拖动侧边圆点自动贴到最近边缘。结束时间前都属于当天。")
+            Text("单轴循环 · 跨日不清空 · 任务持续保留")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -335,6 +379,17 @@ private struct SettingsPopover: View {
         }
         .padding(16)
         .frame(width: 238)
+    }
+
+    private var autoReturnDescription: String {
+        switch store.autoReturnMode {
+        case .off:
+            "时间轴保持在手动滚动后的位置"
+        case .currentTime:
+            "回到停靠位置，并随当前时间缓慢上移"
+        case .firstTodo:
+            "将下一项未完成任务吸附到停靠位置；无任务时回到现在"
+        }
     }
 
     private var startBinding: Binding<Int> {

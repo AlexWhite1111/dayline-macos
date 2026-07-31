@@ -33,7 +33,6 @@ final class TodoItemCodableTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: 1_753_147_800)
         )
         let state = SavedState(
-            dayKey: "2026-07-22",
             items: [item],
             fontSize: 16,
             titleHeightRatio: 0.58,

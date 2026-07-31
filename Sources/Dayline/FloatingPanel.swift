@@ -40,24 +40,20 @@ final class FloatingPanelController: NSWindowController {
         let isCompleted: Bool
     }
 
-    private struct PanelLayoutInput: Equatable {
-        let expandedTitleWidth: CGFloat
-        let fontSize: Double
-        let titleHeightRatio: Double
-    }
-
-    private let store: TodayStore
+    private let store: TimelineStore
     private let panel: FloatingPanel
     private let axisPanel: FloatingPanel
     private var todoPanels: [UUID: FloatingPanel] = [:]
     private var dragSession: TodoDragSession?
-    private var timelineFirstSlotCenterY: CGFloat?
+    private var timelineProjection: TimelineProjection?
     private var subscriptions = Set<AnyCancellable>()
     private var controlsAreVisible = true
     private var isSettingsPresented = false
     private var dockedScreen: NSScreen?
     private var layoutUpdateIsScheduled = false
     private var overlayStateUpdateIsScheduled = false
+    private var autoReturnWorkItem: DispatchWorkItem?
+    private var autoReturnIsActive = false
 
     private let collapsedSize = NSSize(width: 48, height: 44)
     private let edgeInset: CGFloat = 2
@@ -79,11 +75,11 @@ final class FloatingPanelController: NSWindowController {
         panel.isReleasedWhenClosed = false
         panel.animationBehavior = .none
         panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenNone]
         return panel
     }
 
-    init(store: TodayStore) {
+    init(store: TimelineStore) {
         self.store = store
         panel = Self.makePanel(
             size: NSSize(
@@ -106,9 +102,15 @@ final class FloatingPanelController: NSWindowController {
                 onHandleDragChanged: { [weak self] point in self?.trackHandle(at: point) },
                 onHandleDragEnded: { [weak self] point in self?.snap(to: point) },
                 onSettingsPresented: { [weak self] in self?.setSettingsPresented($0) },
-                onTimelineFirstSlotCenterChanged: { [weak self] firstSlotCenterY in
-                    self?.timelineFirstSlotCenterY = firstSlotCenterY
-                    self?.updateOverlayPositions()
+                onTimelineProjectionChanged: { [weak self] projection in
+                    guard let self else { return }
+                    let sizeChanged = self.timelineProjection?.fontSize != projection.fontSize
+                    self.timelineProjection = projection
+                    if sizeChanged { self.updateAxisFrame() }
+                    self.updateOverlayPositions()
+                },
+                onTimelineScrollActivity: { [weak self] in
+                    self?.registerTimelineInteraction()
                 }
             )
         )
@@ -131,7 +133,7 @@ final class FloatingPanelController: NSWindowController {
         view.onDoubleClick = { [weak self] in self?.toggleControls() }
         view.onScroll = { [weak self] event in self?.scrollTimeline(with: event) }
         view.clickGuardDuration = { [weak self] in
-            self?.store.clickGuardDuration ?? TodayStore.defaultClickGuardDuration
+            self?.store.clickGuardDuration ?? TimelineStore.defaultClickGuardDuration
         }
         axisPanel.contentView = view
         axisPanel.isMovable = false
@@ -151,30 +153,6 @@ final class FloatingPanelController: NSWindowController {
     }
 
     private func observeLayoutInputs() {
-        Publishers.CombineLatest3(store.$items, store.$fontSize, store.$titleHeightRatio)
-            .map { items, fontSize, titleHeightRatio in
-                let expandedTitleWidth = items
-                    .filter(\.isTitleExpanded)
-                    .map {
-                        DaylineLayout.titleWidth(
-                            $0.title,
-                            fontSize: fontSize,
-                            titleHeightRatio: titleHeightRatio
-                        )
-                    }
-                    .max() ?? 0
-                return PanelLayoutInput(
-                    expandedTitleWidth: expandedTitleWidth,
-                    fontSize: fontSize,
-                    titleHeightRatio: titleHeightRatio
-                )
-            }
-            .removeDuplicates()
-            .sink { [weak self] input in
-                self?.applyFrame(expandedTitleWidth: input.expandedTitleWidth)
-            }
-            .store(in: &subscriptions)
-
         Publishers.CombineLatest(store.$panelHeightRatio, store.$compactTitleWidth)
             .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 }
             .receive(on: RunLoop.main)
@@ -205,6 +183,54 @@ final class FloatingPanelController: NSWindowController {
         )
             .sink { [weak self] _, _, _, _ in
                 self?.refreshOverlayStateSoon()
+            }
+            .store(in: &subscriptions)
+
+        Publishers.CombineLatest(
+            store.$autoReturnMode,
+            store.$autoReturnDelay
+        )
+            .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 }
+            .sink { [weak self] mode, _ in
+                self?.configureAutoReturn(mode: mode)
+            }
+            .store(in: &subscriptions)
+
+        store.$clockDate
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self,
+                      self.autoReturnIsActive,
+                      self.store.autoReturnMode != .off
+                else { return }
+                self.scrollAutoReturnTargetToAnchor()
+            }
+            .store(in: &subscriptions)
+
+        taskStates
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self,
+                      self.autoReturnIsActive,
+                      self.store.autoReturnMode == .firstTodo
+                else { return }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self,
+                          self.autoReturnIsActive,
+                          self.store.autoReturnMode == .firstTodo
+                    else { return }
+                    self.scrollAutoReturnTargetToAnchor()
+                }
+            }
+            .store(in: &subscriptions)
+
+        store.$timelineAnchorPosition
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self, self.autoReturnIsActive else { return }
+                DispatchQueue.main.async {
+                    self.scrollAutoReturnTargetToAnchor()
+                }
             }
             .store(in: &subscriptions)
     }
@@ -318,7 +344,7 @@ final class FloatingPanelController: NSWindowController {
         guard store.isExpanded, panel.isVisible else {
             axisPanel.orderOut(nil)
             todoPanels.values.forEach { $0.orderOut(nil) }
-            timelineFirstSlotCenterY = nil
+            timelineProjection = nil
             dragSession = nil
             if store.projectionMinute != nil { store.projectionMinute = nil }
             return
@@ -355,7 +381,7 @@ final class FloatingPanelController: NSWindowController {
             let opacity = DaylineLayout.timelineEdgeOpacity(
                 centerY: centerY,
                 viewportHeight: timelineFrame.height,
-                fontSize: store.fontSize
+                fontSize: timelineProjection?.fontSize ?? store.fontSize
             )
             guard opacity > 0, taskPanel.frame.width > 1 else {
                 taskPanel.orderOut(nil)
@@ -383,7 +409,9 @@ final class FloatingPanelController: NSWindowController {
             FloatingItemGeometry.axisHitFrame(
                 in: panel.frame,
                 edge: store.dockEdge,
-                edgeClearance: DaylineLayout.timelineFadeDistance(for: store.fontSize)
+                edgeClearance: DaylineLayout.timelineFadeDistance(
+                    for: timelineProjection?.fontSize ?? store.fontSize
+                )
                     + DaylineLayout.currentTimeButtonHitSize / 2
             ),
             display: true
@@ -448,14 +476,7 @@ final class FloatingPanelController: NSWindowController {
         for minute: Int,
         viewportHeight: CGFloat
     ) -> CGFloat {
-        if let timelineFirstSlotCenterY {
-            return DaylineLayout.timelineCenterY(
-                minute: minute,
-                referenceMinute: store.timelineStartMinute,
-                referenceCenterY: timelineFirstSlotCenterY,
-                fontSize: store.fontSize
-            )
-        }
+        if let timelineProjection { return timelineProjection.centerY(for: minute) }
         let currentMinute = DayClock.minuteOfDay(
             for: store.clockDate,
             dayEndMinute: store.timelineEndMinute
@@ -473,7 +494,7 @@ final class FloatingPanelController: NSWindowController {
                 fontSize: store.fontSize,
                 position: store.timelineAnchorPosition
             ),
-            fontSize: store.fontSize
+            slotHeight: DaylineLayout.slotHeight(for: store.fontSize)
         )
     }
 
@@ -547,7 +568,91 @@ final class FloatingPanelController: NSWindowController {
     }
 
     private func scrollTimeline(with event: NSEvent) {
+        registerTimelineInteraction()
         panel.contentView?.firstDescendant(of: NSScrollView.self)?.scrollWheel(with: event)
+    }
+
+    private func configureAutoReturn(mode: AutoReturnMode) {
+        autoReturnWorkItem?.cancel()
+        autoReturnWorkItem = nil
+        autoReturnIsActive = false
+        guard mode != .off else { return }
+        scheduleAutoReturn()
+    }
+
+    private func registerTimelineInteraction() {
+        guard store.autoReturnMode != .off else { return }
+        autoReturnIsActive = false
+        scheduleAutoReturn()
+    }
+
+    private func scheduleAutoReturn() {
+        autoReturnWorkItem?.cancel()
+        let delay = min(
+            max(store.autoReturnDelay, TimelineStore.autoReturnDelayRange.lowerBound),
+            TimelineStore.autoReturnDelayRange.upperBound
+        )
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.store.autoReturnMode != .off else { return }
+            self.autoReturnWorkItem = nil
+            self.autoReturnIsActive = true
+            self.scrollAutoReturnTargetToAnchor()
+        }
+        autoReturnWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    private func scrollAutoReturnTargetToAnchor() {
+        guard store.isExpanded,
+              let timelineProjection,
+              let scrollView = panel.contentView?.firstDescendant(of: NSScrollView.self),
+              let targetMinute = autoReturnTargetMinute()
+        else { return }
+
+        let timelineFrame = FloatingItemGeometry.timelineFrame(
+            in: panel.frame,
+            edge: store.dockEdge
+        )
+        let targetCenterY = DaylineLayout.timelineAnchorCenterY(
+            viewportHeight: timelineFrame.height,
+            fontSize: timelineProjection.fontSize,
+            position: store.timelineAnchorPosition
+        )
+        let deltaY = timelineProjection.centerY(for: targetMinute) - targetCenterY
+        guard abs(deltaY) > 0.01 else { return }
+
+        let clipView = scrollView.contentView
+        let target = NSPoint(
+            x: clipView.bounds.origin.x,
+            y: clipView.bounds.origin.y + deltaY
+        )
+        clipView.scroll(to: target)
+        scrollView.reflectScrolledClipView(clipView)
+    }
+
+    private func autoReturnTargetMinute() -> Double? {
+        let currentMinute = DayClock.minuteOfDayFraction(
+            for: store.clockDate,
+            dayEndMinute: store.timelineEndMinute
+        )
+        switch store.autoReturnMode {
+        case .off:
+            return nil
+        case .currentTime:
+            return DayClock.clamp(
+                currentMinute,
+                start: store.timelineStartMinute,
+                end: store.timelineEndMinute
+            )
+        case .firstTodo:
+            let currentTask = store.currentTask(at: Int(currentMinute))
+            return currentTask.map { Double($0.minute) }
+                ?? DayClock.clamp(
+                    currentMinute,
+                    start: store.timelineStartMinute,
+                    end: store.timelineEndMinute
+                )
+        }
     }
 
     private func snap(to pointer: NSPoint) {
@@ -576,28 +681,19 @@ final class FloatingPanelController: NSWindowController {
         updateAxisFrame()
     }
 
-    private func applyFrame(
-        on forcedScreen: NSScreen? = nil,
-        expandedTitleWidth publishedTitleWidth: CGFloat? = nil
-    ) {
+    private func applyFrame(on forcedScreen: NSScreen? = nil) {
         let screen = forcedScreen ?? bestScreen()
         dockedScreen = screen
         let visible = screen.visibleFrame
-        let expandedTitleWidth = publishedTitleWidth ?? store.items
-            .filter(\.isTitleExpanded)
-            .map {
-                DaylineLayout.titleWidth(
-                    $0.title,
-                    fontSize: store.fontSize,
-                    titleHeightRatio: store.titleHeightRatio
-                )
-            }
-            .max() ?? 0
-        let contentWidth = min(
-            DaylineLayout.compactPanelWidth(for: CGFloat(store.compactTitleWidth))
-                + max(0, expandedTitleWidth - CGFloat(store.compactTitleWidth)),
-            visible.width - 4
+        let contentWidth = DaylineLayout.compactPanelWidth(
+            for: CGFloat(store.compactTitleWidth)
         )
+        let titleLimit = max(
+            CGFloat(store.compactTitleWidth),
+            visible.width - edgeInset * 2
+                - (DaylineLayout.compactPanelWidth - DaylineLayout.defaultCompactTitleWidth)
+        )
+        if store.pillTitleLimit != titleLimit { store.pillTitleLimit = titleLimit }
         let width = store.isExpanded ? contentWidth : collapsedSize.width
         let height = store.isExpanded
             ? DaylineLayout.expandedPanelHeight(
@@ -640,22 +736,8 @@ final class FloatingPanelController: NSWindowController {
     }
 
     private func setPanelFrame(_ frame: NSRect) {
-        updatePillTitleLimit(for: frame)
         panel.setFrame(frame, display: true)
         reconcileOverlaysSoon()
-    }
-
-    private func updatePillTitleLimit(for panelFrame: NSRect) {
-        let timelineWidth = FloatingItemGeometry.timelineFrame(
-            in: panelFrame,
-            edge: store.dockEdge
-        ).width
-        let compactWidth = CGFloat(store.compactTitleWidth)
-        let limit = compactWidth + max(
-            0,
-            timelineWidth - DaylineLayout.compactTimelineWidth(for: compactWidth)
-        )
-        if store.pillTitleLimit != limit { store.pillTitleLimit = limit }
     }
 
     private func verticalPlacement(
@@ -701,12 +783,40 @@ final class FloatingPanelController: NSWindowController {
     }
 }
 
+final class GuardedClickArbiter {
+    private var sequence = 0
+
+    func resolve(
+        clickCount: Int,
+        delay: TimeInterval,
+        singleClick: @escaping () -> Void,
+        doubleClick: @escaping () -> Void
+    ) {
+        guard clickCount > 0 else { return }
+        sequence &+= 1
+        if clickCount.isMultiple(of: 2) {
+            doubleClick()
+            return
+        }
+
+        let pendingSequence = sequence
+        guard delay > 0 else {
+            singleClick()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard self?.sequence == pendingSequence else { return }
+            singleClick()
+        }
+    }
+}
+
 private final class AxisRecallView: NSView {
     var onSingleClick: (() -> Void)?
     var onDoubleClick: (() -> Void)?
     var onScroll: ((NSEvent) -> Void)?
-    var clickGuardDuration = { TodayStore.defaultClickGuardDuration }
-    private var clickSequence = 0
+    var clickGuardDuration = { TimelineStore.defaultClickGuardDuration }
+    private let clickArbiter = GuardedClickArbiter()
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
@@ -719,23 +829,12 @@ private final class AxisRecallView: NSView {
     override func scrollWheel(with event: NSEvent) { onScroll?(event) }
 
     override func mouseUp(with event: NSEvent) {
-        guard event.clickCount > 0 else { return }
-        clickSequence &+= 1
-        if event.clickCount.isMultiple(of: 2) {
-            onDoubleClick?()
-            return
-        }
-
-        let sequence = clickSequence
-        let delay = max(0, clickGuardDuration())
-        guard delay > 0 else {
-            onSingleClick?()
-            return
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self, self.clickSequence == sequence else { return }
-            self.onSingleClick?()
-        }
+        clickArbiter.resolve(
+            clickCount: event.clickCount,
+            delay: max(0, clickGuardDuration()),
+            singleClick: { [weak self] in self?.onSingleClick?() },
+            doubleClick: { [weak self] in self?.onDoubleClick?() }
+        )
     }
 }
 

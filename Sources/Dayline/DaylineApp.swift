@@ -15,7 +15,7 @@ struct DaylineApp {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var store: TodayStore?
+    private var store: TimelineStore?
     private var panelController: FloatingPanelController?
     private var automationController: AutomationController?
     private var pendingAutomationURLs: [URL] = []
@@ -23,7 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         installApplicationMenu()
 
-        let store = TodayStore()
+        let store = TimelineStore()
         let controller = FloatingPanelController(store: store)
         self.store = store
         self.panelController = controller

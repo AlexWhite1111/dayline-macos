@@ -3,15 +3,14 @@ import Foundation
 
 @MainActor
 final class AutomationController {
-    private let store: TodayStore
+    private let store: TimelineStore
 
-    init(store: TodayStore) {
+    init(store: TimelineStore) {
         self.store = store
     }
 
     func execute(_ request: DaylineAutomationRequest) -> DaylineAutomationResponse {
         do {
-            store.rolloverIfNeeded()
             switch request.action {
             case .list:
                 return success(request.action, todos: allTodos())
@@ -34,6 +33,15 @@ final class AutomationController {
                 if let time = request.time { store.move(id: id, to: try parseTime(time)) }
                 return success(request.action, todos: [todo(id)])
 
+            case .setTimelineRange:
+                let start = try parseRangeStart(request.start)
+                let end = try parseRangeEnd(request.end, after: start)
+                store.setTimelineRange(start: start, end: end)
+                return success(
+                    request.action,
+                    message: "时间轴范围已更新为 \(automationTime(start))–\(automationTime(end))。"
+                )
+
             case .setCompleted:
                 let id = try requiredID(request.itemID)
                 guard store.item(id: id) != nil else { throw Failure("没有找到这条待办。") }
@@ -51,6 +59,7 @@ final class AutomationController {
             return DaylineAutomationResponse(
                 ok: false,
                 action: request.action,
+                timeline: timeline(),
                 error: error.localizedDescription
             )
         }
@@ -61,7 +70,23 @@ final class AutomationController {
         todos: [DaylineAutomationTodo] = [],
         message: String? = nil
     ) -> DaylineAutomationResponse {
-        DaylineAutomationResponse(ok: true, action: action, todos: todos, message: message)
+        DaylineAutomationResponse(
+            ok: true,
+            action: action,
+            timeline: timeline(),
+            todos: todos,
+            message: message
+        )
+    }
+
+    private func timeline() -> DaylineAutomationTimeline {
+        DaylineAutomationTimeline(
+            startMinute: store.timelineStartMinute,
+            endMinute: store.timelineEndMinute,
+            start: automationTime(store.timelineStartMinute),
+            end: automationTime(store.timelineEndMinute),
+            intervalMinutes: 15
+        )
     }
 
     private func todo(_ id: UUID) -> DaylineAutomationTodo {
@@ -105,18 +130,56 @@ final class AutomationController {
             (0...30).contains(hour),
             (0..<60).contains(minute),
             minute.isMultiple(of: 15)
-        else { throw Failure("时间必须使用 HH:mm，且只能是 15 分钟刻度。") }
+        else { throw Failure("截止时间使用 HH:mm 格式和 15 分钟刻度。") }
 
         var result = hour * 60 + minute
         let overflow = max(0, store.timelineEndMinute - 24 * 60)
         if result < store.timelineStartMinute, result < overflow { result += 24 * 60 }
         guard (store.timelineStartMinute..<store.timelineEndMinute).contains(result) else {
             throw Failure(
-                "时间必须位于 \(DayClock.displayRangeTime(store.timelineStartMinute))–"
+                "可用截止时间范围为 \(DayClock.displayRangeTime(store.timelineStartMinute))–"
                     + "\(DayClock.displayRangeTime(store.timelineEndMinute))。"
             )
         }
         return result
+    }
+
+    private func parseRangeStart(_ value: String?) throws -> Int {
+        let result = try parseWholeHour(value, field: "start")
+        guard result <= 23 * 60 else {
+            throw Failure("start 使用 00:00–23:00 的整点格式。")
+        }
+        return result
+    }
+
+    private func parseRangeEnd(_ value: String?, after start: Int) throws -> Int {
+        let rawEnd = try parseWholeHour(value, field: "end")
+        let end = rawEnd < 24 * 60 && rawEnd <= start ? rawEnd + 24 * 60 : rawEnd
+        guard end <= 30 * 60 else {
+            throw Failure("end 使用 01:00–30:00 的整点格式，并位于 start 之后。")
+        }
+        guard end >= start + 60 else {
+            throw Failure("时间轴范围至少包含 1 小时。")
+        }
+        return end
+    }
+
+    private func parseWholeHour(_ value: String?, field: String) throws -> Int {
+        let parts = value?.split(separator: ":", omittingEmptySubsequences: false) ?? []
+        guard
+            parts.count == 2,
+            let hour = Int(parts[0]),
+            let minute = Int(parts[1]),
+            (0...30).contains(hour),
+            minute == 0
+        else {
+            throw Failure("\(field) 使用 HH:00 格式。")
+        }
+        return hour * 60
+    }
+
+    private func automationTime(_ minute: Int) -> String {
+        String(format: "%02d:%02d", minute / 60, minute % 60)
     }
 
     private struct Failure: LocalizedError {

@@ -4,6 +4,7 @@ public enum DaylineAutomationAction: String, Codable, Sendable {
     case list
     case add
     case update
+    case setTimelineRange = "set-timeline-range"
     case setCompleted = "set-completed"
     case delete
 }
@@ -27,7 +28,10 @@ public struct DaylineAutomationRequest: Codable, Sendable {
     public let action: DaylineAutomationAction
     public let itemID: UUID?
     public let title: String?
+    /// The todo deadline in `HH:mm` form on the configured cyclic timeline.
     public let time: String?
+    public let start: String?
+    public let end: String?
     public let completed: Bool?
 
     public init(
@@ -36,6 +40,8 @@ public struct DaylineAutomationRequest: Codable, Sendable {
         itemID: UUID? = nil,
         title: String? = nil,
         time: String? = nil,
+        start: String? = nil,
+        end: String? = nil,
         completed: Bool? = nil
     ) {
         self.requestID = requestID
@@ -43,6 +49,8 @@ public struct DaylineAutomationRequest: Codable, Sendable {
         self.itemID = itemID
         self.title = title
         self.time = time
+        self.start = start
+        self.end = end
         self.completed = completed
     }
 
@@ -70,6 +78,8 @@ public struct DaylineAutomationRequest: Codable, Sendable {
         itemID = values["id"].flatMap(UUID.init(uuidString:))
         title = values["title"]
         time = values["time"]
+        start = values["start"]
+        end = values["end"]
         if let value = values["completed"] {
             switch value.lowercased() {
             case "true", "1": completed = true
@@ -93,6 +103,8 @@ public struct DaylineAutomationRequest: Codable, Sendable {
         if let itemID { query.append(URLQueryItem(name: "id", value: itemID.uuidString)) }
         if let title { query.append(URLQueryItem(name: "title", value: title)) }
         if let time { query.append(URLQueryItem(name: "time", value: time)) }
+        if let start { query.append(URLQueryItem(name: "start", value: start)) }
+        if let end { query.append(URLQueryItem(name: "end", value: end)) }
         if let completed {
             query.append(URLQueryItem(name: "completed", value: completed ? "true" : "false"))
         }
@@ -104,10 +116,34 @@ public struct DaylineAutomationRequest: Codable, Sendable {
     }
 }
 
+public struct DaylineAutomationTimeline: Codable, Sendable {
+    public let startMinute: Int
+    public let endMinute: Int
+    public let start: String
+    public let end: String
+    public let intervalMinutes: Int
+
+    public init(
+        startMinute: Int,
+        endMinute: Int,
+        start: String,
+        end: String,
+        intervalMinutes: Int
+    ) {
+        self.startMinute = startMinute
+        self.endMinute = endMinute
+        self.start = start
+        self.end = end
+        self.intervalMinutes = intervalMinutes
+    }
+}
+
 public struct DaylineAutomationTodo: Codable, Sendable {
     public let id: UUID
     public let title: String
+    /// The deadline offset in minutes from midnight, including next-day overflow.
     public let minute: Int
+    /// The todo deadline displayed on the configured cyclic timeline.
     public let time: String
     public let completed: Bool
     public let createdAt: Date
@@ -132,6 +168,7 @@ public struct DaylineAutomationTodo: Codable, Sendable {
 public struct DaylineAutomationResponse: Codable, Sendable {
     public let ok: Bool
     public let action: DaylineAutomationAction
+    public let timeline: DaylineAutomationTimeline?
     public let todos: [DaylineAutomationTodo]
     public let message: String?
     public let error: String?
@@ -139,12 +176,14 @@ public struct DaylineAutomationResponse: Codable, Sendable {
     public init(
         ok: Bool,
         action: DaylineAutomationAction,
+        timeline: DaylineAutomationTimeline? = nil,
         todos: [DaylineAutomationTodo] = [],
         message: String? = nil,
         error: String? = nil
     ) {
         self.ok = ok
         self.action = action
+        self.timeline = timeline
         self.todos = todos
         self.message = message
         self.error = error

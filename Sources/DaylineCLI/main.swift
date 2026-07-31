@@ -81,6 +81,8 @@ private let help = """
   dayline complete <UUID>
   dayline reopen <UUID>
   dayline delete <UUID>
+
+规则：“今日”是应用名；单轴循环，跨日不清空；任务持续保留，直到明确修改或删除。
 """
 
 do {

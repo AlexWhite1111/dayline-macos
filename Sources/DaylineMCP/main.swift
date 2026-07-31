@@ -54,11 +54,11 @@ private final class MCPServer {
             "capabilities": ["tools": ["listChanged": false]],
             "serverInfo": [
                 "name": "dayline-mcp",
-                "title": "今日待办",
-                "version": "1.0.0",
-                "description": "管理本机今日待办的本地 MCP 服务器"
+                "title": "Dayline 待办",
+                "version": "1.1.0",
+                "description": "管理本机循环时间轴和待办"
             ],
-            "instructions": "管理用户今天的待办。修改前先用 list_todos 获取 UUID；若目标不明确，先向用户确认。"
+            "instructions": "先调用 list_todos；time 是截止时间。《今日》只有一条循环时间轴，跨日不清空，“次日”仍在同一条轴上。任务和完成状态持续保留，直到被明确修改或删除。"
         ]
     }
 
@@ -110,6 +110,12 @@ private final class MCPServer {
                 throw RPCError(code: -32602, message: "Provide title or time")
             }
             return DaylineAutomationRequest(action: .update, itemID: id, title: title, time: time)
+        case "set_timeline_range":
+            return DaylineAutomationRequest(
+                action: .setTimelineRange,
+                start: try string("start", in: arguments),
+                end: try string("end", in: arguments)
+            )
         case "set_todo_completed":
             guard let completed = arguments["completed"] as? Bool else {
                 throw RPCError(code: -32602, message: "Missing completed")
@@ -144,50 +150,76 @@ private final class MCPServer {
         [
             tool(
                 "list_todos",
-                title: "列出今日待办",
-                description: "列出今天的全部待办及其 UUID、时间和完成状态。",
+                title: "列出时间轴待办",
+                description: "返回时间轴范围、15 分钟间隔和全部待办。",
                 properties: [:],
                 required: [],
-                readOnly: true
+                readOnly: true,
+                destructive: false,
+                idempotent: true
+            ),
+            tool(
+                "set_timeline_range",
+                title: "设置时间轴范围",
+                description: "设置时间轴范围；现有待办会调整到新范围内。",
+                properties: [
+                    "start": startTimeSchema,
+                    "end": endTimeSchema
+                ],
+                required: ["start", "end"],
+                readOnly: false,
+                destructive: true,
+                idempotent: true
             ),
             tool(
                 "add_todo",
-                title: "添加今日待办",
-                description: "添加一条今天的待办。time 可省略，格式为 HH:mm 且必须是 15 分钟刻度。",
+                title: "添加时间轴待办",
+                description: "添加待办；time 是截止时间，省略时由 App 选择空闲刻度。",
                 properties: [
                     "title": ["type": "string", "minLength": 1, "description": "待办标题"],
                     "time": timeSchema
                 ],
-                required: ["title"]
+                required: ["title"],
+                readOnly: false,
+                destructive: false,
+                idempotent: false
             ),
             tool(
                 "update_todo",
-                title: "修改今日待办",
-                description: "按 UUID 修改待办标题、时间或两者。先调用 list_todos 获取 UUID。",
+                title: "修改时间轴待办",
+                description: "按 UUID 修改标题或截止时间。",
                 properties: [
                     "id": idSchema,
                     "title": ["type": "string", "minLength": 1, "description": "新标题"],
                     "time": timeSchema
                 ],
-                required: ["id"]
+                required: ["id"],
+                readOnly: false,
+                destructive: false,
+                idempotent: true
             ),
             tool(
                 "set_todo_completed",
                 title: "设置完成状态",
-                description: "按 UUID 将待办设为已完成或未完成。",
+                description: "按 UUID 设置完成状态。",
                 properties: [
                     "id": idSchema,
                     "completed": ["type": "boolean", "description": "true 为完成，false 为恢复"]
                 ],
-                required: ["id", "completed"]
+                required: ["id", "completed"],
+                readOnly: false,
+                destructive: false,
+                idempotent: true
             ),
             tool(
                 "delete_todo",
-                title: "删除今日待办",
-                description: "按 UUID 删除一条待办。",
+                title: "删除时间轴待办",
+                description: "按 UUID 删除待办。",
                 properties: ["id": idSchema],
                 required: ["id"],
-                destructive: true
+                readOnly: false,
+                destructive: true,
+                idempotent: false
             )
         ]
     }
@@ -198,8 +230,9 @@ private final class MCPServer {
         description: String,
         properties: [String: Any],
         required: [String],
-        readOnly: Bool = false,
-        destructive: Bool = false
+        readOnly: Bool,
+        destructive: Bool,
+        idempotent: Bool
     ) -> [String: Any] {
         [
             "name": name,
@@ -214,7 +247,7 @@ private final class MCPServer {
             "annotations": [
                 "readOnlyHint": readOnly,
                 "destructiveHint": destructive,
-                "idempotentHint": readOnly,
+                "idempotentHint": idempotent,
                 "openWorldHint": false
             ]
         ]
@@ -227,8 +260,24 @@ private final class MCPServer {
     private var timeSchema: [String: Any] {
         [
             "type": "string",
-            "pattern": "^(?:[0-2]?[0-9]|30):(?:00|15|30|45)$",
-            "description": "24 小时制时间，如 10:15；次日凌晨也可写 01:00 或 25:00"
+            "pattern": "^(?:(?:[0-2]?[0-9]):(?:00|15|30|45)|30:00)$",
+            "description": "待办截止时间，使用 15 分钟刻度，如 10:15；次日凌晨可写 01:00 或 25:00"
+        ]
+    }
+
+    private var startTimeSchema: [String: Any] {
+        [
+            "type": "string",
+            "pattern": "^(?:[01]?[0-9]|2[0-3]):00$",
+            "description": "时间轴开始整点，如 07:00"
+        ]
+    }
+
+    private var endTimeSchema: [String: Any] {
+        [
+            "type": "string",
+            "pattern": "^(?:(?:[01]?[0-9]|2[0-9]):00|30:00)$",
+            "description": "时间轴结束整点，如 23:00；次日凌晨可写 01:00 或 25:00"
         ]
     }
 

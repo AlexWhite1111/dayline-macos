@@ -9,7 +9,7 @@ final class DayClockTests: XCTestCase {
         XCTAssertEqual(DayClock.defaultTaskMinute(for: try date(hour: 9, minute: 15)), 9 * 60 + 15)
     }
 
-    func testDefaultTimeStaysInsideTodayWindow() throws {
+    func testDefaultTimeStaysInsideCycle() throws {
         XCTAssertEqual(DayClock.defaultTaskMinute(for: try date(hour: 5, minute: 30)), DayClock.startMinute)
         XCTAssertEqual(DayClock.defaultTaskMinute(for: try date(hour: 23, minute: 59)), 24 * 60)
     }
@@ -29,6 +29,21 @@ final class DayClockTests: XCTestCase {
         XCTAssertEqual(DayClock.quarterAtOrAfter(7 * 60 + 15), 7 * 60 + 15)
         XCTAssertEqual(DayClock.quarterAtOrAfter(2 * 60), DayClock.startMinute)
         XCTAssertEqual(DayClock.quarterAtOrAfter(26 * 60), DayClock.lastTaskMinute)
+    }
+
+    func testFractionalCurrentTimeClampsInsideTheVisibleTimeline() {
+        XCTAssertEqual(
+            DayClock.clamp(Double(23 * 60 + 5), start: 8 * 60, end: 21 * 60),
+            Double(20 * 60 + 45)
+        )
+        XCTAssertEqual(
+            DayClock.clamp(Double(7 * 60 + 30), start: 8 * 60, end: 21 * 60),
+            Double(8 * 60)
+        )
+        XCTAssertEqual(
+            DayClock.clamp(Double(12 * 60 + 0.5), start: 8 * 60, end: 21 * 60),
+            Double(12 * 60 + 0.5)
+        )
     }
 
     func testEveryMinuteHasExactlyOneCurrentMarkerRow() {
@@ -52,30 +67,35 @@ final class DayClockTests: XCTestCase {
         XCTAssertEqual(DayClock.displayTime(25 * 60), "01:00")
     }
 
-    func testNextDayCutoffStillBelongsToPreviousDay() throws {
+    func testAfterMidnightTimeRemainsInsideTheSameCycle() throws {
         let calendar = Calendar.autoupdatingCurrent
         let day = calendar.startOfDay(for: Date())
-        let lateNight = try XCTUnwrap(calendar.date(byAdding: .minute, value: 23 * 60 + 30, to: day))
         let afterMidnight = try XCTUnwrap(calendar.date(byAdding: .minute, value: 24 * 60 + 30, to: day))
-        let cutoff = try XCTUnwrap(calendar.date(byAdding: .minute, value: 25 * 60, to: day))
-
-        XCTAssertEqual(
-            DayClock.dayKey(for: lateNight, dayEndMinute: 25 * 60),
-            DayClock.dayKey(for: afterMidnight, dayEndMinute: 25 * 60)
-        )
-        XCTAssertNotEqual(
-            DayClock.dayKey(for: afterMidnight, dayEndMinute: 25 * 60),
-            DayClock.dayKey(for: cutoff, dayEndMinute: 25 * 60)
-        )
         XCTAssertEqual(DayClock.minuteOfDay(for: afterMidnight, dayEndMinute: 25 * 60), 24 * 60 + 30)
     }
 
-    private func date(hour: Int, minute: Int) throws -> Date {
+    func testFractionalMinuteIncludesSecondsAndMovesProjectionContinuously() throws {
+        let exact = try date(hour: 9, minute: 30, second: 30)
+        XCTAssertEqual(
+            DayClock.minuteOfDayFraction(for: exact),
+            Double(9 * 60 + 30) + 0.5,
+            accuracy: 0.001
+        )
+
+        let projection = TimelineProjection(firstMinute: 9 * 60, firstCenterY: 50, fontSize: 16)
+        XCTAssertEqual(
+            projection.centerY(for: Double(9 * 60) + 0.5) - projection.centerY(for: 9 * 60),
+            DaylineLayout.slotHeight(for: 16) / 30,
+            accuracy: 0.001
+        )
+    }
+
+    private func date(hour: Int, minute: Int, second: Int = 0) throws -> Date {
         let calendar = Calendar.autoupdatingCurrent
         var components = calendar.dateComponents([.year, .month, .day], from: Date())
         components.hour = hour
         components.minute = minute
-        components.second = 0
+        components.second = second
         return try XCTUnwrap(calendar.date(from: components))
     }
 }
