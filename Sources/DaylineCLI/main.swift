@@ -60,8 +60,6 @@ private func request() throws -> DaylineAutomationRequest {
         )
     case "delete":
         return DaylineAutomationRequest(action: .delete, itemID: try itemID(at: 1))
-    case "help", "--help", "-h":
-        throw CLIError.usage(help)
     default:
         throw CLIError.usage("未知命令：\(command)\n\n\(help)")
     }
@@ -84,6 +82,11 @@ private let help = """
 
 规则：“今日”是应用名；单轴循环，跨日不清空；任务持续保留，直到明确修改或删除。
 """
+
+if let command = arguments.first, ["help", "--help", "-h"].contains(command) {
+    print(help)
+    exit(EXIT_SUCCESS)
+}
 
 do {
     let response = try DaylineAutomationClient().perform(try request())

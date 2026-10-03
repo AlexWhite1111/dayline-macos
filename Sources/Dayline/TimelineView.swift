@@ -5,7 +5,9 @@ struct TimelineView: View {
     @Binding var focusMinute: Int?
     let onProjectionChanged: (TimelineProjection) -> Void
     let onUserScrollActivity: () -> Void
+    let onReturnToCurrentTime: () -> Void
     @State private var userScrollIsActive = false
+    @State private var measuredProjection: TimelineProjection?
 
     var body: some View {
         GeometryReader { geometry in
@@ -41,14 +43,16 @@ struct TimelineView: View {
                 start: store.timelineStartMinute,
                 end: store.timelineEndMinute
             )
-            let currentScreenY = DaylineLayout.timelineCenterY(
-                minute: currentMinute,
-                referenceMinute: anchor,
-                referenceCenterY: anchorY,
-                slotHeight: slotHeight
+            let projection = measuredProjection ?? TimelineProjection(
+                firstMinute: anchor,
+                firstCenterY: anchorY,
+                fontSize: fontSize
             )
-            let currentIsAbove = currentScreenY < -3
-            let currentIsBelow = currentScreenY > geometry.size.height + 3
+            let returnEdge = Self.currentTimeReturnEdge(
+                minute: currentMinute,
+                projection: projection,
+                viewportHeight: geometry.size.height
+            )
 
             ZStack {
                 ScrollView(.vertical) {
@@ -90,6 +94,7 @@ struct TimelineView: View {
                         )
                     },
                     action: { _, projection in
+                        measuredProjection = projection
                         onProjectionChanged(projection)
                     }
                 )
@@ -116,8 +121,8 @@ struct TimelineView: View {
                     seedFocus(currentMinute)
                 }
 
-                if currentIsAbove || currentIsBelow {
-                    Button { seedFocus(currentMinute) } label: {
+                if let returnEdge {
+                    Button(action: onReturnToCurrentTime) {
                         Circle()
                             .fill(daylineWarm)
                             .frame(width: 4, height: 4)
@@ -133,7 +138,7 @@ struct TimelineView: View {
                         x: store.dockEdge == .left
                             ? DaylineLayout.timelineAxisInset
                             : geometry.size.width - DaylineLayout.timelineAxisInset,
-                        y: currentIsAbove
+                        y: returnEdge == .top
                             ? fadeDistance
                             : geometry.size.height - fadeDistance
                     )
@@ -143,6 +148,19 @@ struct TimelineView: View {
                 }
             }
         }
+    }
+
+    enum ReturnEdge { case top, bottom }
+
+    static func currentTimeReturnEdge(
+        minute: Int,
+        projection: TimelineProjection,
+        viewportHeight: CGFloat
+    ) -> ReturnEdge? {
+        let centerY = projection.centerY(for: minute)
+        if centerY < -3 { return .top }
+        if centerY > viewportHeight + 3 { return .bottom }
+        return nil
     }
 
     private func edgeFade(height: CGFloat, distance: CGFloat) -> some View {

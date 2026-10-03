@@ -19,23 +19,19 @@ final class AutomationController {
                 let title = try requiredTitle(request.title)
                 let minute = try request.time.map(parseTime)
                 let id = request.itemID ?? UUID()
-                guard store.item(id: id) == nil else { throw Failure("待办 ID 已存在。") }
                 store.addTask(id: id, title: title, at: minute)
                 return success(request.action, todos: [todo(id)])
 
             case .update:
                 let id = try requiredID(request.itemID)
-                guard store.item(id: id) != nil else { throw Failure("没有找到这条待办。") }
-                guard request.title != nil || request.time != nil else {
-                    throw Failure("至少提供 title 或 time 中的一项。")
-                }
                 if let title = request.title { store.updateTitle(id: id, title: try requiredTitle(title)) }
                 if let time = request.time { store.move(id: id, to: try parseTime(time)) }
                 return success(request.action, todos: [todo(id)])
 
             case .setTimelineRange:
-                let start = try parseRangeStart(request.start)
-                let end = try parseRangeEnd(request.end, after: start)
+                let start = try parseClock(request.start)
+                let rawEnd = try parseClock(request.end)
+                let end = rawEnd < 24 * 60 && rawEnd <= start ? rawEnd + 24 * 60 : rawEnd
                 store.setTimelineRange(start: start, end: end)
                 return success(
                     request.action,
@@ -44,14 +40,12 @@ final class AutomationController {
 
             case .setCompleted:
                 let id = try requiredID(request.itemID)
-                guard store.item(id: id) != nil else { throw Failure("没有找到这条待办。") }
                 guard let completed = request.completed else { throw Failure("缺少 completed。") }
                 store.setCompleted(id: id, completed: completed)
                 return success(request.action, todos: [todo(id)])
 
             case .delete:
                 let id = try requiredID(request.itemID)
-                guard store.item(id: id) != nil else { throw Failure("没有找到这条待办。") }
                 store.delete(id: id)
                 return success(request.action, message: "已删除待办。")
             }
@@ -104,7 +98,7 @@ final class AutomationController {
             id: item.id,
             title: item.title,
             minute: item.minute,
-            time: DayClock.displayRangeTime(item.minute),
+            time: automationTime(item.minute),
             completed: item.isCompleted,
             createdAt: item.createdAt
         )
@@ -116,66 +110,23 @@ final class AutomationController {
     }
 
     private func requiredTitle(_ value: String?) throws -> String {
-        let title = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !title.isEmpty else { throw Failure("待办标题不能为空。") }
-        return title
+        guard let value else { throw Failure("缺少 title。") }
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func parseTime(_ value: String) throws -> Int {
-        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
-        guard
-            parts.count == 2,
-            let hour = Int(parts[0]),
-            let minute = Int(parts[1]),
-            (0...30).contains(hour),
-            (0..<60).contains(minute),
-            minute.isMultiple(of: 15)
-        else { throw Failure("截止时间使用 HH:mm 格式和 15 分钟刻度。") }
-
-        var result = hour * 60 + minute
+        var result = try parseClock(value)
         let overflow = max(0, store.timelineEndMinute - 24 * 60)
         if result < store.timelineStartMinute, result < overflow { result += 24 * 60 }
-        guard (store.timelineStartMinute..<store.timelineEndMinute).contains(result) else {
-            throw Failure(
-                "可用截止时间范围为 \(DayClock.displayRangeTime(store.timelineStartMinute))–"
-                    + "\(DayClock.displayRangeTime(store.timelineEndMinute))。"
-            )
-        }
         return result
     }
 
-    private func parseRangeStart(_ value: String?) throws -> Int {
-        let result = try parseWholeHour(value, field: "start")
-        guard result <= 23 * 60 else {
-            throw Failure("start 使用 00:00–23:00 的整点格式。")
-        }
-        return result
-    }
-
-    private func parseRangeEnd(_ value: String?, after start: Int) throws -> Int {
-        let rawEnd = try parseWholeHour(value, field: "end")
-        let end = rawEnd < 24 * 60 && rawEnd <= start ? rawEnd + 24 * 60 : rawEnd
-        guard end <= 30 * 60 else {
-            throw Failure("end 使用 01:00–30:00 的整点格式，并位于 start 之后。")
-        }
-        guard end >= start + 60 else {
-            throw Failure("时间轴范围至少包含 1 小时。")
-        }
-        return end
-    }
-
-    private func parseWholeHour(_ value: String?, field: String) throws -> Int {
+    private func parseClock(_ value: String?) throws -> Int {
         let parts = value?.split(separator: ":", omittingEmptySubsequences: false) ?? []
-        guard
-            parts.count == 2,
-            let hour = Int(parts[0]),
-            let minute = Int(parts[1]),
-            (0...30).contains(hour),
-            minute == 0
-        else {
-            throw Failure("\(field) 使用 HH:00 格式。")
+        guard parts.count == 2, let hour = Int(parts[0]), let minute = Int(parts[1]) else {
+            throw Failure("缺少 HH:mm 时间。")
         }
-        return hour * 60
+        return hour * 60 + minute
     }
 
     private func automationTime(_ minute: Int) -> String {

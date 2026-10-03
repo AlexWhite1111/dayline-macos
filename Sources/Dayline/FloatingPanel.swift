@@ -53,7 +53,7 @@ final class FloatingPanelController: NSWindowController {
     private var dockedScreen: NSScreen?
     private var pendingOverlayUpdate: Bool?
     private var autoReturnWorkItem: DispatchWorkItem?
-    private var autoReturnIsActive = false
+    private(set) var autoReturnIsActive = false
 
     private let collapsedSize = NSSize(width: 48, height: 44)
     private let edgeInset: CGFloat = 2
@@ -112,6 +112,9 @@ final class FloatingPanelController: NSWindowController {
                 },
                 onTimelineScrollActivity: { [weak self] in
                     self?.registerTimelineInteraction()
+                },
+                onReturnToCurrentTime: { [weak self] in
+                    self?.returnToCurrentTime()
                 }
             )
         )
@@ -192,19 +195,19 @@ final class FloatingPanelController: NSWindowController {
             store.$autoReturnDelay
         )
             .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 }
-            .sink { [weak self] mode, _ in
-                self?.configureAutoReturn(mode: mode)
+            .sink { [weak self] mode, delay in
+                self?.configureAutoReturn(mode: mode, delay: delay)
             }
             .store(in: &subscriptions)
 
         store.$clockDate
             .dropFirst()
-            .sink { [weak self] _ in
+            .sink { [weak self] date in
                 guard let self,
                       self.autoReturnIsActive,
                       self.store.autoReturnMode != .off
                 else { return }
-                self.scrollAutoReturnTargetToAnchor()
+                self.scrollAutoReturnTargetToAnchor(at: date)
             }
             .store(in: &subscriptions)
 
@@ -349,6 +352,11 @@ final class FloatingPanelController: NSWindowController {
         }
 
         let itemIDs = Set(store.items.map(\.id))
+        if let session = dragSession, !itemIDs.contains(session.id) {
+            dragSession = nil
+            store.projectionMinute = nil
+            registerTimelineInteraction()
+        }
         for id in todoPanels.keys.filter({ !itemIDs.contains($0) }) {
             todoPanels.removeValue(forKey: id)?.orderOut(nil)
         }
@@ -498,6 +506,7 @@ final class FloatingPanelController: NSWindowController {
 
     private func beginDragging(_ id: UUID, initialTranslation: CGFloat) {
         guard let panel = todoPanels[id], let item = store.item(id: id) else { return }
+        registerTimelineInteraction()
         if store.editingID != id { store.commitEditing() }
         dragSession = TodoDragSession(
             id: id,
@@ -560,6 +569,7 @@ final class FloatingPanelController: NSWindowController {
         guard let session = dragSession, session.id == id else { return }
         store.move(id: id, to: session.previewMinute)
         dragSession = nil
+        registerTimelineInteraction()
         resizeTodoPanel(id: id)
         updateOverlayPositions()
         refreshWindowLevels()
@@ -570,12 +580,12 @@ final class FloatingPanelController: NSWindowController {
         timelineScrollView()?.scrollWheel(with: event)
     }
 
-    private func configureAutoReturn(mode: AutoReturnMode) {
+    private func configureAutoReturn(mode: AutoReturnMode, delay: TimeInterval) {
         autoReturnWorkItem?.cancel()
         autoReturnWorkItem = nil
         autoReturnIsActive = false
         guard mode != .off else { return }
-        scheduleAutoReturn()
+        scheduleAutoReturn(delay: delay)
     }
 
     private func registerTimelineInteraction() {
@@ -584,15 +594,13 @@ final class FloatingPanelController: NSWindowController {
         scheduleAutoReturn()
     }
 
-    private func scheduleAutoReturn() {
+    private func scheduleAutoReturn(delay requestedDelay: TimeInterval? = nil) {
         autoReturnWorkItem?.cancel()
-        let delay = min(
-            max(store.autoReturnDelay, TimelineStore.autoReturnDelayRange.lowerBound),
-            TimelineStore.autoReturnDelayRange.upperBound
-        )
+        let delay = requestedDelay ?? store.autoReturnDelay
         let workItem = DispatchWorkItem { [weak self] in
             guard let self, self.store.autoReturnMode != .off else { return }
             self.autoReturnWorkItem = nil
+            guard self.dragSession == nil else { return }
             self.autoReturnIsActive = true
             self.scrollAutoReturnTargetToAnchor()
         }
@@ -600,23 +608,52 @@ final class FloatingPanelController: NSWindowController {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
-    private func scrollAutoReturnTargetToAnchor() {
+    private func returnToCurrentTime() {
+        registerTimelineInteraction()
+        scrollToAnchor(DayClock.clamp(
+            DayClock.minuteOfDayFraction(for: Date(), dayEndMinute: store.timelineEndMinute),
+            start: store.timelineStartMinute,
+            end: store.timelineEndMinute
+        ))
+    }
+
+    private func scrollAutoReturnTargetToAnchor(at date: Date? = nil) {
+        guard let minute = autoReturnTargetMinute(at: date ?? store.clockDate) else { return }
+        scrollToAnchor(minute)
+    }
+
+    private func scrollToAnchor(_ minute: Double) {
         guard store.isExpanded,
+              dragSession == nil,
               let timelineProjection,
-              let scrollView = timelineScrollView(),
-              let targetMinute = autoReturnTargetMinute()
+              let scrollView = timelineScrollView()
         else { return }
 
-        let timelineFrame = FloatingItemGeometry.timelineFrame(
-            in: panel.frame,
-            edge: store.dockEdge
+        Self.scrollToAnchor(
+            minute,
+            in: scrollView,
+            projection: timelineProjection,
+            viewportHeight: FloatingItemGeometry.timelineFrame(
+                in: panel.frame,
+                edge: store.dockEdge
+            ).height,
+            anchorPosition: store.timelineAnchorPosition
         )
+    }
+
+    static func scrollToAnchor(
+        _ minute: Double,
+        in scrollView: NSScrollView,
+        projection: TimelineProjection,
+        viewportHeight: CGFloat,
+        anchorPosition: Double
+    ) {
         let targetCenterY = DaylineLayout.timelineAnchorCenterY(
-            viewportHeight: timelineFrame.height,
-            fontSize: timelineProjection.fontSize,
-            position: store.timelineAnchorPosition
+            viewportHeight: viewportHeight,
+            fontSize: projection.fontSize,
+            position: anchorPosition
         )
-        let deltaY = timelineProjection.centerY(for: targetMinute) - targetCenterY
+        let deltaY = projection.centerY(for: minute) - targetCenterY
         guard abs(deltaY) > 0.01 else { return }
 
         let clipView = scrollView.contentView
@@ -637,9 +674,9 @@ final class FloatingPanelController: NSWindowController {
         return scrollView
     }
 
-    private func autoReturnTargetMinute() -> Double? {
+    func autoReturnTargetMinute(at date: Date) -> Double? {
         let currentMinute = DayClock.minuteOfDayFraction(
-            for: store.clockDate,
+            for: date,
             dayEndMinute: store.timelineEndMinute
         )
         switch store.autoReturnMode {

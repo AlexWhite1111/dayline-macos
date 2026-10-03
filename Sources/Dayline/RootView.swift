@@ -10,6 +10,7 @@ struct RootView: View {
     let onSettingsPresented: (Bool) -> Void
     let onTimelineProjectionChanged: (TimelineProjection) -> Void
     let onTimelineScrollActivity: () -> Void
+    let onReturnToCurrentTime: () -> Void
 
     var body: some View {
         Group {
@@ -30,9 +31,6 @@ struct RootView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear(perform: seedFocus)
-        .onChange(of: store.timelineStartMinute) { _, _ in seedFocus() }
-        .onChange(of: store.timelineEndMinute) { _, _ in seedFocus() }
     }
 
     private var rail: some View {
@@ -60,17 +58,8 @@ struct RootView: View {
             store: store,
             focusMinute: $store.focusMinute,
             onProjectionChanged: onTimelineProjectionChanged,
-            onUserScrollActivity: onTimelineScrollActivity
-        )
-    }
-
-    private func seedFocus() {
-        let preferred = store.focusMinute
-            ?? DayClock.minuteOfDay(dayEndMinute: store.timelineEndMinute)
-        store.focusMinute = DayClock.quarterAtOrAfter(
-            preferred,
-            start: store.timelineStartMinute,
-            end: store.timelineEndMinute
+            onUserScrollActivity: onTimelineScrollActivity,
+            onReturnToCurrentTime: onReturnToCurrentTime
         )
     }
 
@@ -186,6 +175,11 @@ private struct SettingsPopover: View {
     @State private var launchAtLoginError: String?
 
     var body: some View {
+        ScrollView { settingsContent }
+            .frame(width: 238, height: 600)
+    }
+
+    private var settingsContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("时间轴")
                 .font(.custom("Songti SC", fixedSize: 18).weight(.semibold))
@@ -340,7 +334,6 @@ private struct SettingsPopover: View {
                 .keyboardShortcut("q", modifiers: .command)
         }
         .padding(16)
-        .frame(width: 238)
     }
 
     private func sliderSetting(

@@ -39,14 +39,14 @@ final class TimelineStore: ObservableObject {
     @Published private(set) var clockDate = Date()
 
     private(set) var hasSavedPlacement = false
-    private var isLoading = true
+    private var savesChanges = false
     private var clockTimer: Timer?
     private let stateURL: URL
 
     init(stateURL: URL? = nil, startsTimer: Bool = true) {
         self.stateURL = stateURL ?? Self.defaultStateURL
         restore()
-        isLoading = false
+        savesChanges = true
         if startsTimer {
             clockTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) {
                 [weak self] _ in
@@ -65,7 +65,6 @@ final class TimelineStore: ObservableObject {
         title: String = "",
         at minute: Int? = nil
     ) -> UUID {
-        guard item(id: id) == nil else { return id }
         let preferred = minute ?? DayClock.defaultTaskMinute(
             start: timelineStartMinute,
             end: timelineEndMinute
@@ -162,9 +161,13 @@ final class TimelineStore: ObservableObject {
     }
 
     func setTimelineRange(start: Int, end: Int) {
+        let previouslySavedChanges = savesChanges
+        savesChanges = false
         timelineStartMinute = min(max(start, 0), 23 * 60)
         timelineEndMinute = min(max(end, timelineStartMinute + 60), 30 * 60)
         clampItemsToRange()
+        savesChanges = previouslySavedChanges
+        saveWhenReady()
     }
 
     func useInitialPlacement(edge: DockEdge, y: Double) {
@@ -251,79 +254,33 @@ final class TimelineStore: ObservableObject {
                 SavedState.self,
                 from: Data(contentsOf: stateURL)
             )
-            fontSize = min(
-                max(saved.fontSize, DaylineLayout.fontSizeRange.lowerBound),
-                DaylineLayout.fontSizeRange.upperBound
-            )
-            titleHeightRatio = min(
-                max(
-                    saved.titleHeightRatio ?? DaylineLayout.defaultTitleHeightRatio,
-                    DaylineLayout.titleHeightRatioRange.lowerBound
-                ),
-                DaylineLayout.titleHeightRatioRange.upperBound
-            )
-            compactTitleWidth = min(
-                max(saved.compactTitleWidth ?? Double(DaylineLayout.defaultCompactTitleWidth),
-                    DaylineLayout.compactTitleWidthRange.lowerBound),
-                DaylineLayout.compactTitleWidthRange.upperBound
-            )
-            panelHeightRatio = min(max(saved.panelHeightRatio ?? 0.9, 0.6), 1)
-            timelineAnchorPosition = min(
-                max(
-                    saved.timelineAnchorPosition ?? DaylineLayout.defaultTimelineAnchorPosition,
-                    DaylineLayout.timelineAnchorPositionRange.lowerBound
-                ),
-                DaylineLayout.timelineAnchorPositionRange.upperBound
-            )
+            fontSize = saved.fontSize
+            titleHeightRatio = saved.titleHeightRatio ?? DaylineLayout.defaultTitleHeightRatio
+            compactTitleWidth = saved.compactTitleWidth ?? Double(DaylineLayout.defaultCompactTitleWidth)
+            panelHeightRatio = saved.panelHeightRatio ?? 0.9
+            timelineAnchorPosition = saved.timelineAnchorPosition ?? DaylineLayout.defaultTimelineAnchorPosition
             nativeGlassStyle = saved.nativeGlassStyle ?? .regular
             timeDisplayMode = saved.timeDisplayMode ?? .absolute
             pinsOnlyCurrentTask = saved.pinsOnlyCurrentTask ?? false
-            clickGuardDuration = min(
-                max(
-                    saved.clickGuardDuration ?? Self.defaultClickGuardDuration,
-                    Self.clickGuardDurationRange.lowerBound
-                ),
-                Self.clickGuardDurationRange.upperBound
-            )
+            clickGuardDuration = saved.clickGuardDuration ?? Self.defaultClickGuardDuration
             autoReturnMode = saved.autoReturnMode
                 ?? ((saved.autoReturnToCurrentTime ?? false) ? .currentTime : .off)
-            autoReturnDelay = min(
-                max(
-                    saved.autoReturnDelay ?? Self.defaultAutoReturnDelay,
-                    Self.autoReturnDelayRange.lowerBound
-                ),
-                Self.autoReturnDelayRange.upperBound
-            )
+            autoReturnDelay = saved.autoReturnDelay ?? Self.defaultAutoReturnDelay
             dockEdge = saved.dockEdge
-            dockY = min(max(saved.dockY, 0.08), 0.92)
+            dockY = saved.dockY
             isExpanded = saved.isExpanded
-            timelineStartMinute = min(max(saved.timelineStartMinute ?? DayClock.startMinute, 0), 23 * 60)
-            timelineEndMinute = min(
-                max(saved.timelineEndMinute ?? DayClock.endMinute, timelineStartMinute + 60),
-                30 * 60
-            )
+            timelineStartMinute = saved.timelineStartMinute ?? DayClock.startMinute
+            timelineEndMinute = saved.timelineEndMinute ?? DayClock.endMinute
             hasSavedPlacement = true
-            items = saved.items.map { item in
-                TodoItem(
-                    id: item.id,
-                    title: item.title,
-                    minute: DayClock.quarterAtOrAfter(
-                        item.minute,
-                        start: timelineStartMinute,
-                        end: timelineEndMinute
-                    ),
-                    isTitleExpanded: item.isTitleExpanded,
-                    isCompleted: item.isCompleted,
-                    createdAt: item.createdAt
-                )
-            }
+            items = saved.items
+            clampItemsToRange()
         } catch {
             NSLog("Dayline restore failed: \(error.localizedDescription)")
         }
     }
 
     private func saveWhenReady() {
-        if !isLoading { persist() }
+        if savesChanges { persist() }
     }
 
     private static var defaultStateURL: URL {

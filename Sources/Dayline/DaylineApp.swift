@@ -46,6 +46,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store?.commitEditing()
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        store?.commitEditing()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }

@@ -55,6 +55,8 @@ CLI 与 MCP 都通过本地 `dayline://automation/v1` 协议交给运行中的 A
 
 - SwiftUI：胶囊、时间轴、编辑和设置界面
 - AppKit `NSPanel`：透明悬浮窗口、跨桌面显示和窗口层级
-- SwiftUI Liquid Glass / `NSVisualEffectView`：可切换的原生玻璃效果
+- SwiftUI Liquid Glass：Regular / Clear 原生玻璃材质
 - 本地 URL RPC + stdio MCP：AI 自动化接口
 - 本地 JSON：保存当前循环时间轴任务与少量显示设置
+
+开发入口与验证命令见 [开发指南](docs/DEVELOPMENT.md)。

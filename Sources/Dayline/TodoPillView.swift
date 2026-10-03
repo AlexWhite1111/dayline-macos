@@ -317,7 +317,10 @@ struct TodoPillView: View {
             titleIsFocused = false
             return
         }
-        DispatchQueue.main.async { titleIsFocused = true }
+        DispatchQueue.main.async {
+            guard store.editingID == item.id else { return }
+            titleIsFocused = true
+        }
     }
 
     private func commitEditing() {

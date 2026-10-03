@@ -106,9 +106,6 @@ private final class MCPServer {
             let id = try uuid(in: arguments)
             let title = arguments["title"] as? String
             let time = arguments["time"] as? String
-            guard title != nil || time != nil else {
-                throw RPCError(code: -32602, message: "Provide title or time")
-            }
             return DaylineAutomationRequest(action: .update, itemID: id, title: title, time: time)
         case "set_timeline_range":
             return DaylineAutomationRequest(
@@ -133,7 +130,7 @@ private final class MCPServer {
     }
 
     private func string(_ name: String, in arguments: [String: Any]) throws -> String {
-        guard let value = arguments[name] as? String, !value.isEmpty else {
+        guard let value = arguments[name] as? String else {
             throw RPCError(code: -32602, message: "Missing \(name)")
         }
         return value

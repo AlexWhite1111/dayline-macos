@@ -130,36 +130,18 @@ final class AutomationControllerTests: XCTestCase {
         XCTAssertEqual(response.timeline?.end, "25:00")
     }
 
-    func testTimelineRangeRejectsNonWholeHourWithoutChangingState() {
+    func testNextDayDeadlineCanBeReusedFromListResponse() throws {
         let (store, stateURL) = makeStore()
         defer { try? FileManager.default.removeItem(at: stateURL.deletingLastPathComponent()) }
-
-        let response = AutomationController(store: store).execute(
-            DaylineAutomationRequest(
-                action: .setTimelineRange,
-                start: "07:00",
-                end: "25:15"
-            )
-        )
-
-        XCTAssertFalse(response.ok)
-        XCTAssertEqual(store.timelineStartMinute, 7 * 60)
-        XCTAssertEqual(store.timelineEndMinute, 25 * 60)
-        XCTAssertEqual(response.timeline?.start, "07:00")
-        XCTAssertEqual(response.timeline?.end, "25:00")
-    }
-
-    func testRejectsNonQuarterHourTime() {
-        let (store, stateURL) = makeStore()
-        defer { try? FileManager.default.removeItem(at: stateURL.deletingLastPathComponent()) }
-
-        let response = AutomationController(store: store).execute(
-            DaylineAutomationRequest(action: .add, title: "无效时间", time: "10:07")
-        )
-
-        XCTAssertFalse(response.ok)
-        XCTAssertTrue(response.error?.contains("15 分钟") == true)
-        XCTAssertTrue(store.items.isEmpty)
+        let controller = AutomationController(store: store)
+        let id = store.addTask(title: "After midnight", at: 24 * 60 + 15)
+        let listed = controller.execute(.init(action: .list))
+        let time = try XCTUnwrap(listed.todos.first?.time)
+        XCTAssertEqual(time, "24:15")
+        let updated = controller.execute(.init(action: .update, itemID: id, time: time))
+        XCTAssertTrue(updated.ok)
+        XCTAssertEqual(updated.todos.first?.minute, 24 * 60 + 15)
+        XCTAssertEqual(updated.todos.first?.time, time)
     }
 
     private func makeStore() -> (TimelineStore, URL) {

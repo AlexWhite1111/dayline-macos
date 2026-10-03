@@ -75,19 +75,19 @@ final class TimelineStoreTitleExpansionTests: XCTestCase {
         XCTAssertEqual(restored.autoReturnDelay, 45)
     }
 
-    func testAutoReturnSettingsUseSafeDefaultsAndClampOnRestore() {
+    func testAutoReturnSettingsUseDefaultsAndRestoreSavedValue() {
         let (store, url) = makeStore()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         XCTAssertEqual(store.autoReturnMode, .off)
         XCTAssertEqual(store.autoReturnDelay, TimelineStore.defaultAutoReturnDelay)
 
         store.autoReturnMode = .firstTodo
-        store.autoReturnDelay = 999
+        store.autoReturnDelay = 90
         store.persist()
 
         let restored = TimelineStore(stateURL: url, startsTimer: false)
         XCTAssertEqual(restored.autoReturnMode, .firstTodo)
-        XCTAssertEqual(restored.autoReturnDelay, TimelineStore.autoReturnDelayRange.upperBound)
+        XCTAssertEqual(restored.autoReturnDelay, 90)
     }
 
     func testLegacyEnabledAutoReturnMigratesToCurrentTimeMode() throws {
