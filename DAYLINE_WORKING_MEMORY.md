@@ -202,3 +202,9 @@ return-dot tests). Isolated critique fixture (work/ui-critique, own state file)
 rendered numerals in dark mode, the undo chip at the deleted slot, and no return dot
 when now sits at the top. Real clicks, Esc, drag feel and undo-chip clicking were
 not exercised; computer-use cannot target accessory apps.
+
+Build 56 installation: CFBundleVersion 56 packaged to work/install-build56/今日.app,
+installed to /Applications/今日.app and launched. Strict deep signature verified; all
+three installed binaries match the package. Build 55 and data snapshots are in
+work/install-build56/. timeline.json hash unchanged across quit/install/launch;
+read-only `dayline list` succeeded. outputs/今日.app stays at its committed state.
