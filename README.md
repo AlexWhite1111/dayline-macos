@@ -33,23 +33,39 @@ scripts/build-app.sh
 
 ## AI 与自动化接口
 
-安装后可通过 `dayline` 命令管理待办：
+界面上能做的事都能通过 `dayline` 命令或 MCP 完成，不需要手动操作：
 
 ```zsh
-dayline list --json
+dayline list --json                       # 待办、时间轴范围、现在、下一项、全部设置
 dayline add --title "准备面试" --time 10:15
+dayline add-many '[{"title":"写报告","time":"09:15"},{"title":"开会"}]'
 dayline update <UUID> --title "进行模拟面试" --time 11:30
 dayline complete <UUID>
 dayline reopen <UUID>
 dayline delete <UUID>
+dayline range 07:00 25:00
+dayline show [<UUID>|now]                 # 展开并滚到待办或现在
+dayline settings                          # 读取全部设置
+dayline set clockFormat twelveHour showsOverFullScreen true dockEdge right
 ```
 
-App 同时内置标准输入输出 MCP 服务器 `dayline-mcp`，提供
-`list_todos`、`set_timeline_range`、`add_todo`、`update_todo`、
-`set_todo_completed` 和 `delete_todo`。`list_todos` 同时返回当前时间轴范围和
-15 分钟间隔；待办的 `time` 字段统一表示截止时间。
+可用设置项与取值见 `dayline help`。数值会限制在界面滑块的范围内；只要有一个
+取值无效，整次修改都不生效。
+
+App 内置标准输入输出 MCP 服务器 `dayline-mcp`，提供 `list_todos`、`add_todo`、
+`add_todos`、`update_todo`、`set_todo_completed`、`delete_todo`、
+`set_timeline_range`、`get_settings`、`update_settings` 和 `show_timeline`。
+
+- `time` 一律表示截止时间，使用 15 分钟刻度；次日凌晨可写 `01:00` 或 `25:00`。
+- `list_todos` 返回的 `timeline.now` 和 `timeline.nextTodoID` 已按 App 的循环规则
+  算好，AI 修改任务前先调用它。
+- `add_todos` 全部校验通过才添加；空闲刻度不够时整组不加。
+- 失败的响应带 `errorCode`：`invalid_request`、`not_found`、`timeline_full`、
+  `range_too_small`、`invalid_time`。删除成功会返回被删的待办，便于恢复。
+- 接口始终使用 24 小时制，与界面的时钟设置无关。
+
 CLI 与 MCP 都通过本地 `dayline://automation/v1` 协议交给运行中的 App 处理，
-由 App 统一串行保存。AI 修改任务前必须先调用 `list_todos`。
+由 App 统一串行保存。
 
 ## 技术结构
 

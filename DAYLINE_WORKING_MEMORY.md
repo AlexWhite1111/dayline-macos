@@ -229,3 +229,22 @@ Verification: check.sh passed, 57 tests. Critique fixture with the switch on:
 CGWindow reported its windows on screen inside another app's full-screen Space
 while installed build 56 (switch absent) stayed off screen; 12-hour pills read
 1:15 for 13:15 and the 13:00 numeral reads 1.
+
+## Alignment — 2026-10-09 complete automation API (v1, additive)
+
+Intent, decided with the user: everything the UI can do is reachable from CLI/MCP
+with no manual step. Additions to `dayline://automation/v1`:
+- `list` also returns now / nowMinute / nextTodoID (Store's cyclic rule) and the
+  full settings snapshot.
+- `add-many`: all-or-nothing batch; refused when slots are short or a time is bad.
+- `update-settings`: partial update of every setting incl. dock edge/position,
+  expanded, control rail visibility and launch at login; numeric values clamp to
+  the UI ranges; enum values use the app's raw values.
+- `show`: expand, bring forward and scroll to a todo or to now.
+- Responses carry `errorCode` (invalid_request, not_found, timeline_full,
+  range_too_small, invalid_time); blank titles are refused; delete returns the
+  removed todo. CLI gains range/settings/set/show/add-many.
+Owners: protocol in DaylineAutomation; AutomationController maps to Store and a
+narrow panel protocol implemented by FloatingPanelController, which now applies
+frame changes from Store publishers (dock edge/position, expanded) so any writer
+takes effect. Store stays the only persisted state owner.

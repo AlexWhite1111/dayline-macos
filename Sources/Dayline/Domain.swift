@@ -204,6 +204,7 @@ enum DaylineLayout {
     static let titleHeightRatioRange: ClosedRange<Double> = 0.4...0.75
     static let defaultTimelineAnchorPosition = 0.97
     static let timelineAnchorPositionRange: ClosedRange<Double> = 0...1
+    static let panelHeightRatioRange: ClosedRange<Double> = 0.6...1
     private static let songtiInkToPointSizeRatio: CGFloat = 0.96
 
     static var axisToPillGap: CGFloat { pillInset - timelineAxisInset }

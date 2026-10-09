@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = FloatingPanelController(store: store)
         self.store = store
         self.panelController = controller
-        automationController = AutomationController(store: store)
+        automationController = AutomationController(store: store, panel: controller)
         controller.show()
 
         pendingAutomationURLs.forEach(handleAutomationURL)

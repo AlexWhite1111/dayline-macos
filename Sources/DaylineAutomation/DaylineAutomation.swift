@@ -7,6 +7,60 @@ public enum DaylineAutomationAction: String, Codable, Sendable {
     case setTimelineRange = "set-timeline-range"
     case setCompleted = "set-completed"
     case delete
+    case addMany = "add-many"
+    case updateSettings = "update-settings"
+    case show
+}
+
+/// Machine-readable failure reasons carried in `DaylineAutomationResponse.errorCode`.
+public enum DaylineAutomationErrorCode: String, Codable, Sendable {
+    case invalidRequest = "invalid_request"
+    case notFound = "not_found"
+    case timelineFull = "timeline_full"
+    case rangeTooSmall = "range_too_small"
+    case invalidTime = "invalid_time"
+}
+
+public struct DaylineAutomationNewTodo: Codable, Sendable {
+    public let title: String
+    /// Deadline in `HH:mm`; omitted lets the app choose a free quarter.
+    public let time: String?
+
+    public init(title: String, time: String? = nil) {
+        self.title = title
+        self.time = time
+    }
+}
+
+/// Every setting the UI exposes. Requests set only the fields to change; responses
+/// return all of them. Enum-like strings use the app's raw values.
+public struct DaylineAutomationSettings: Codable, Sendable, Equatable {
+    public var fontSize: Double?
+    public var titleHeightRatio: Double?
+    public var compactTitleWidth: Double?
+    public var panelHeightRatio: Double?
+    public var timelineAnchorPosition: Double?
+    /// `regular` or `clear`.
+    public var glassStyle: String?
+    /// `absolute` or `remaining`.
+    public var timeDisplay: String?
+    /// `system`, `twentyFourHour` or `twelveHour`.
+    public var clockFormat: String?
+    public var pinsOnlyCurrentTask: Bool?
+    public var clickGuardDuration: Double?
+    /// `off`, `currentTime` or `firstTodo`.
+    public var autoReturn: String?
+    public var autoReturnDelay: Double?
+    public var showsOverFullScreen: Bool?
+    public var expanded: Bool?
+    public var controlsVisible: Bool?
+    /// `left` or `right`.
+    public var dockEdge: String?
+    /// Vertical dock position, 0 at the bottom of the screen to 1 at the top.
+    public var dockPosition: Double?
+    public var launchAtLogin: Bool?
+
+    public init() {}
 }
 
 public enum DaylineAutomationError: LocalizedError {
@@ -33,6 +87,8 @@ public struct DaylineAutomationRequest: Codable, Sendable {
     public let start: String?
     public let end: String?
     public let completed: Bool?
+    public let todos: [DaylineAutomationNewTodo]?
+    public let settings: DaylineAutomationSettings?
 
     public init(
         requestID: UUID = UUID(),
@@ -42,7 +98,9 @@ public struct DaylineAutomationRequest: Codable, Sendable {
         time: String? = nil,
         start: String? = nil,
         end: String? = nil,
-        completed: Bool? = nil
+        completed: Bool? = nil,
+        todos: [DaylineAutomationNewTodo]? = nil,
+        settings: DaylineAutomationSettings? = nil
     ) {
         self.requestID = requestID
         self.action = action
@@ -52,6 +110,8 @@ public struct DaylineAutomationRequest: Codable, Sendable {
         self.start = start
         self.end = end
         self.completed = completed
+        self.todos = todos
+        self.settings = settings
     }
 
     public init(url: URL) throws {
@@ -89,6 +149,22 @@ public struct DaylineAutomationRequest: Codable, Sendable {
         } else {
             completed = nil
         }
+        todos = try values["todos"].map { try Self.decodeJSON([DaylineAutomationNewTodo].self, $0) }
+        settings = try values["settings"].map { try Self.decodeJSON(DaylineAutomationSettings.self, $0) }
+    }
+
+    private static func decodeJSON<T: Decodable>(_ type: T.Type, _ value: String) throws -> T {
+        do {
+            return try JSONDecoder().decode(type, from: Data(value.utf8))
+        } catch {
+            throw DaylineAutomationError.invalidRequest("无法解析 JSON 参数：\(error.localizedDescription)")
+        }
+    }
+
+    private static func encodeJSON<T: Encodable>(_ value: T) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return String(decoding: try encoder.encode(value), as: UTF8.self)
     }
 
     public func url() throws -> URL {
@@ -108,6 +184,10 @@ public struct DaylineAutomationRequest: Codable, Sendable {
         if let completed {
             query.append(URLQueryItem(name: "completed", value: completed ? "true" : "false"))
         }
+        if let todos { query.append(URLQueryItem(name: "todos", value: try Self.encodeJSON(todos))) }
+        if let settings {
+            query.append(URLQueryItem(name: "settings", value: try Self.encodeJSON(settings)))
+        }
         components.queryItems = query
         guard let value = components.url else {
             throw DaylineAutomationError.invalidRequest("无法生成自动化 URL。")
@@ -122,19 +202,30 @@ public struct DaylineAutomationTimeline: Codable, Sendable {
     public let start: String
     public let end: String
     public let intervalMinutes: Int
+    /// Current time on the cyclic timeline, including next-day overflow.
+    public let nowMinute: Int
+    public let now: String
+    /// The next incomplete todo by the app's cyclic rule, wrapping past the end.
+    public let nextTodoID: UUID?
 
     public init(
         startMinute: Int,
         endMinute: Int,
         start: String,
         end: String,
-        intervalMinutes: Int
+        intervalMinutes: Int,
+        nowMinute: Int,
+        now: String,
+        nextTodoID: UUID?
     ) {
         self.startMinute = startMinute
         self.endMinute = endMinute
         self.start = start
         self.end = end
         self.intervalMinutes = intervalMinutes
+        self.nowMinute = nowMinute
+        self.now = now
+        self.nextTodoID = nextTodoID
     }
 }
 
@@ -170,23 +261,29 @@ public struct DaylineAutomationResponse: Codable, Sendable {
     public let action: DaylineAutomationAction
     public let timeline: DaylineAutomationTimeline?
     public let todos: [DaylineAutomationTodo]
+    public let settings: DaylineAutomationSettings?
     public let message: String?
     public let error: String?
+    public let errorCode: DaylineAutomationErrorCode?
 
     public init(
         ok: Bool,
         action: DaylineAutomationAction,
         timeline: DaylineAutomationTimeline? = nil,
         todos: [DaylineAutomationTodo] = [],
+        settings: DaylineAutomationSettings? = nil,
         message: String? = nil,
-        error: String? = nil
+        error: String? = nil,
+        errorCode: DaylineAutomationErrorCode? = nil
     ) {
         self.ok = ok
         self.action = action
         self.timeline = timeline
         self.todos = todos
+        self.settings = settings
         self.message = message
         self.error = error
+        self.errorCode = errorCode
     }
 
     public func jsonData(pretty: Bool = false) throws -> Data {

@@ -55,10 +55,10 @@ private final class MCPServer {
             "serverInfo": [
                 "name": "dayline-mcp",
                 "title": "Dayline 待办",
-                "version": "1.1.0",
+                "version": "1.2.0",
                 "description": "管理本机循环时间轴和待办"
             ],
-            "instructions": "先调用 list_todos；time 是截止时间。《今日》只有一条循环时间轴，跨日不清空，“次日”仍在同一条轴上。任务和完成状态持续保留，直到被明确修改或删除。"
+            "instructions": "先调用 list_todos；time 是截止时间。《今日》只有一条循环时间轴，跨日不清空，“次日”仍在同一条轴上。list_todos 的 timeline.now 和 timeline.nextTodoID 已按 App 的循环规则算好，直接使用，不要自己推算。任务和完成状态持续保留，直到被明确修改或删除。界面能做的设置都能用 update_settings 完成；失败时看 errorCode。"
         ]
     }
 
@@ -124,6 +124,33 @@ private final class MCPServer {
             )
         case "delete_todo":
             return DaylineAutomationRequest(action: .delete, itemID: try uuid(in: arguments))
+        case "add_todos":
+            guard let items = arguments["todos"] as? [[String: Any]], !items.isEmpty else {
+                throw RPCError(code: -32602, message: "Missing todos")
+            }
+            let todos = try items.map { item -> DaylineAutomationNewTodo in
+                guard let title = item["title"] as? String else {
+                    throw RPCError(code: -32602, message: "Each todo needs a title")
+                }
+                return DaylineAutomationNewTodo(title: title, time: item["time"] as? String)
+            }
+            return DaylineAutomationRequest(action: .addMany, todos: todos)
+        case "get_settings":
+            return DaylineAutomationRequest(action: .updateSettings, settings: DaylineAutomationSettings())
+        case "update_settings":
+            let data = try JSONSerialization.data(withJSONObject: arguments)
+            guard let settings = try? JSONDecoder().decode(DaylineAutomationSettings.self, from: data) else {
+                throw RPCError(code: -32602, message: "Invalid settings value type")
+            }
+            return DaylineAutomationRequest(action: .updateSettings, settings: settings)
+        case "show_timeline":
+            let id = try (arguments["id"] as? String).map { value -> UUID in
+                guard let id = UUID(uuidString: value) else {
+                    throw RPCError(code: -32602, message: "Invalid id")
+                }
+                return id
+            }
+            return DaylineAutomationRequest(action: .show, itemID: id)
         default:
             throw RPCError(code: -32602, message: "Unknown tool: \(tool)")
         }
@@ -209,6 +236,60 @@ private final class MCPServer {
                 idempotent: true
             ),
             tool(
+                "add_todos",
+                title: "批量添加待办",
+                description: "一次添加多条待办，适合排一天的计划。全部校验通过才添加；空闲刻度不够时整组不加，返回 timeline_full。",
+                properties: [
+                    "todos": [
+                        "type": "array",
+                        "minItems": 1,
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "title": ["type": "string", "minLength": 1, "description": "待办标题"],
+                                "time": timeSchema
+                            ],
+                            "required": ["title"],
+                            "additionalProperties": false
+                        ]
+                    ]
+                ],
+                required: ["todos"],
+                readOnly: false,
+                destructive: false,
+                idempotent: false
+            ),
+            tool(
+                "get_settings",
+                title: "读取设置",
+                description: "返回全部设置的当前值，字段与 update_settings 相同。",
+                properties: [:],
+                required: [],
+                readOnly: true,
+                destructive: false,
+                idempotent: true
+            ),
+            tool(
+                "update_settings",
+                title: "修改设置",
+                description: "修改界面中的任意设置，只传要改的字段；数值会限制在界面允许的范围内。返回修改后的全部设置。",
+                properties: settingsSchema,
+                required: [],
+                readOnly: false,
+                destructive: false,
+                idempotent: true
+            ),
+            tool(
+                "show_timeline",
+                title: "显示时间轴",
+                description: "展开时间轴并移到最前，滚动到指定待办；不传 id 时回到现在。",
+                properties: ["id": idSchema],
+                required: [],
+                readOnly: false,
+                destructive: false,
+                idempotent: true
+            ),
+            tool(
                 "delete_todo",
                 title: "删除时间轴待办",
                 description: "按 UUID 删除待办。",
@@ -247,6 +328,36 @@ private final class MCPServer {
                 "idempotentHint": idempotent,
                 "openWorldHint": false
             ]
+        ]
+    }
+
+    private var settingsSchema: [String: Any] {
+        func number(_ range: String, _ text: String) -> [String: Any] {
+            ["type": "number", "description": "\(text)（\(range)）"]
+        }
+        func choice(_ values: [String], _ text: String) -> [String: Any] {
+            ["type": "string", "enum": values, "description": text]
+        }
+        func flag(_ text: String) -> [String: Any] { ["type": "boolean", "description": text] }
+        return [
+            "fontSize": number("7–19", "尺寸"),
+            "titleHeightRatio": number("0.4–0.75", "标题占胶囊高度的比例"),
+            "compactTitleWidth": number("80–300", "标题最大宽度"),
+            "panelHeightRatio": number("0.6–1", "时间轴占屏幕高度的比例"),
+            "timelineAnchorPosition": number("0–1", "时间轴停靠位置，从底部向上"),
+            "glassStyle": choice(["regular", "clear"], "玻璃材质"),
+            "timeDisplay": choice(["absolute", "remaining"], "显示时刻或剩余时间"),
+            "clockFormat": choice(["system", "twentyFourHour", "twelveHour"], "时钟制式"),
+            "pinsOnlyCurrentTask": flag("只置顶当前任务"),
+            "clickGuardDuration": number("0–0.6 秒", "单双击保护时间"),
+            "autoReturn": choice(["off", "currentTime", "firstTodo"], "无操作后：保持原位、回到现在或首项任务"),
+            "autoReturnDelay": number("5–300 秒", "无操作等待时间"),
+            "showsOverFullScreen": flag("全屏应用上也显示"),
+            "expanded": flag("展开时间轴"),
+            "controlsVisible": flag("显示侧边控制栏"),
+            "dockEdge": choice(["left", "right"], "停靠在屏幕左侧或右侧"),
+            "dockPosition": number("0–1", "停靠的垂直位置，0 为屏幕底部"),
+            "launchAtLogin": flag("开机自动启动")
         ]
     }
 

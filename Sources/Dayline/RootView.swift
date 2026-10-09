@@ -216,7 +216,7 @@ private struct SettingsPopover: View {
             sliderSetting(
                 "时间轴高度",
                 value: $store.panelHeightRatio,
-                in: 0.6...1,
+                in: DaylineLayout.panelHeightRatioRange,
                 step: 0.05,
                 text: "\(Int((store.panelHeightRatio * 100).rounded()))%"
             )

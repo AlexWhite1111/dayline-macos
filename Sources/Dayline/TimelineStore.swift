@@ -94,7 +94,8 @@ final class TimelineStore: ObservableObject {
     }
 
     /// Callers check this before `addTask`; every task owns a distinct quarter.
-    var hasFreeSlot: Bool { items.count < (timelineEndMinute - timelineStartMinute) / 15 }
+    var freeSlotCount: Int { max(0, (timelineEndMinute - timelineStartMinute) / 15 - items.count) }
+    var hasFreeSlot: Bool { freeSlotCount > 0 }
 
     func item(id: UUID) -> TodoItem? {
         items.first { $0.id == id }

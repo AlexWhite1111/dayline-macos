@@ -29,8 +29,9 @@ responses = [json.loads(line) for line in result.stdout.splitlines()]
 assert [response["id"] for response in responses] == [1, 2, 3]
 assert responses[0]["result"]["serverInfo"]["name"] == "dayline-mcp"
 assert {tool["name"] for tool in responses[1]["result"]["tools"]} == {
-    "list_todos", "add_todo", "update_todo", "set_timeline_range",
-    "set_todo_completed", "delete_todo",
+    "list_todos", "add_todo", "add_todos", "update_todo", "set_timeline_range",
+    "set_todo_completed", "delete_todo", "get_settings", "update_settings",
+    "show_timeline",
 }
 assert responses[2]["result"] == {}
 print("CLI help and MCP initialize/tools-list/ping passed.")

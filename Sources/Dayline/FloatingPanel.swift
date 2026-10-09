@@ -48,7 +48,7 @@ final class FloatingPanelController: NSWindowController {
     private var timelineProjection: TimelineProjection?
     private weak var cachedTimelineScrollView: NSScrollView?
     private var subscriptions = Set<AnyCancellable>()
-    private var controlsAreVisible = true
+    private(set) var controlsAreVisible = true
     private var isSettingsPresented = false
     private var dockedScreen: NSScreen?
     private var pendingOverlayUpdate: Bool?
@@ -167,6 +167,17 @@ final class FloatingPanelController: NSWindowController {
             .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 }
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.applyFrame() }
+            .store(in: &subscriptions)
+
+        // Dock and expansion may change from the UI or from automation.
+        Publishers.CombineLatest3(store.$dockEdge, store.$dockY, store.$isExpanded)
+            .dropFirst()
+            .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 && $0.2 == $1.2 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.applyFrame()
+                self?.refreshWindowLevels()
+            }
             .store(in: &subscriptions)
 
         store.$items
@@ -819,5 +830,34 @@ private extension NSView {
     func firstDescendant<T: NSView>(of type: T.Type) -> T? {
         if let match = self as? T { return match }
         return subviews.lazy.compactMap { $0.firstDescendant(of: type) }.first
+    }
+}
+
+extension FloatingPanelController: TimelinePanelControlling {
+    func setControlsVisible(_ visible: Bool) {
+        guard visible != controlsAreVisible else { return }
+        controlsAreVisible = visible
+        if store.isExpanded { movePanelForControls() }
+    }
+
+    func reveal(todo id: UUID?) {
+        let wasExpanded = store.isExpanded
+        if !wasExpanded {
+            controlsAreVisible = true
+            store.isExpanded = true
+        }
+        let minute = id.flatMap { store.item(id: $0)?.minute }
+        store.focusMinute = minute ?? store.quarter(atOrAfter: store.currentMinute)
+        refreshWindowLevels()
+        // A freshly expanded timeline needs one layout pass before direct scrolling.
+        DispatchQueue.main.asyncAfter(deadline: .now() + (wasExpanded ? 0 : 0.2)) { [weak self] in
+            guard let self else { return }
+            if let minute {
+                self.registerTimelineInteraction()
+                self.scrollToAnchor(Double(minute))
+            } else {
+                self.returnToCurrentTime()
+            }
+        }
     }
 }

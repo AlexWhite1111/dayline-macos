@@ -60,8 +60,49 @@ private func request() throws -> DaylineAutomationRequest {
         )
     case "delete":
         return DaylineAutomationRequest(action: .delete, itemID: try itemID(at: 1))
+    case "add-many":
+        let json = arguments.count > 1
+            ? arguments[1]
+            : String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+        guard let todos = try? JSONDecoder().decode([DaylineAutomationNewTodo].self, from: Data(json.utf8))
+        else { throw CLIError.usage("add-many 需要 JSON 数组，如 '[{\"title\":\"读书\",\"time\":\"21:00\"}]'。") }
+        return DaylineAutomationRequest(action: .addMany, todos: todos)
+    case "range":
+        guard arguments.count == 3 else { throw CLIError.usage("range 需要开始和结束整点，如 range 07:00 25:00。") }
+        return DaylineAutomationRequest(action: .setTimelineRange, start: arguments[1], end: arguments[2])
+    case "settings":
+        return DaylineAutomationRequest(action: .updateSettings, settings: DaylineAutomationSettings())
+    case "set":
+        return DaylineAutomationRequest(action: .updateSettings, settings: try settingsFromPairs())
+    case "show":
+        let target = arguments.count > 1 && arguments[1] != "now" ? try itemID(at: 1) : nil
+        return DaylineAutomationRequest(action: .show, itemID: target)
     default:
         throw CLIError.usage("未知命令：\(command)\n\n\(help)")
+    }
+}
+
+/// `set key value [key value …]`: values parse as booleans or numbers when they can.
+private func settingsFromPairs() throws -> DaylineAutomationSettings {
+    let pairs = Array(arguments.dropFirst())
+    guard !pairs.isEmpty, pairs.count.isMultiple(of: 2) else {
+        throw CLIError.usage("set 需要成对的 <设置项> <值>。\n\n\(help)")
+    }
+    let known = Set(Mirror(reflecting: DaylineAutomationSettings()).children.compactMap(\.label))
+    var object: [String: Any] = [:]
+    for index in stride(from: 0, to: pairs.count, by: 2) {
+        let key = pairs[index], raw = pairs[index + 1]
+        guard known.contains(key) else {
+            throw CLIError.usage("未知设置项：\(key)。可用：\(known.sorted().joined(separator: ", "))")
+        }
+        let value: Any = raw == "true" ? true : raw == "false" ? false : (Double(raw).map { $0 as Any } ?? raw)
+        object[key] = value
+    }
+    let data = try JSONSerialization.data(withJSONObject: object)
+    do {
+        return try JSONDecoder().decode(DaylineAutomationSettings.self, from: data)
+    } catch {
+        throw CLIError.usage("设置值类型不对：\(error.localizedDescription)")
     }
 }
 
@@ -79,6 +120,17 @@ private let help = """
   dayline complete <UUID>
   dayline reopen <UUID>
   dayline delete <UUID>
+  dayline add-many '<JSON 数组>'        （或从标准输入读取）
+  dayline range <开始 HH:00> <结束 HH:00>
+  dayline show [<UUID>|now]
+  dayline settings
+  dayline set <设置项> <值> [<设置项> <值> …]
+
+设置项：fontSize titleHeightRatio compactTitleWidth panelHeightRatio
+  timelineAnchorPosition glassStyle(regular|clear) timeDisplay(absolute|remaining)
+  clockFormat(system|twentyFourHour|twelveHour) pinsOnlyCurrentTask clickGuardDuration
+  autoReturn(off|currentTime|firstTodo) autoReturnDelay showsOverFullScreen expanded
+  controlsVisible dockEdge(left|right) dockPosition(0–1) launchAtLogin
 
 规则：“今日”是应用名；单轴循环，跨日不清空；任务持续保留，直到明确修改或删除。
 """
