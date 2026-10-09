@@ -104,7 +104,6 @@ final class FloatingPanelController: NSWindowController {
                 onSettingsPresented: { [weak self] in self?.setSettingsPresented($0) },
                 onTimelineProjectionChanged: { [weak self] projection in
                     guard let self else { return }
-                    _ = self.timelineScrollView()
                     let sizeChanged = self.timelineProjection?.fontSize != projection.fontSize
                     self.timelineProjection = projection
                     if sizeChanged { self.updateAxisFrame() }
@@ -292,14 +291,7 @@ final class FloatingPanelController: NSWindowController {
         store.pinsOnlyCurrentTask && store.isExpanded
     }
 
-    private var currentTaskID: UUID? {
-        store.currentTask(
-            at: DayClock.minuteOfDay(
-                for: store.clockDate,
-                dayEndMinute: store.timelineEndMinute
-            )
-        )?.id
-    }
+    private var currentTaskID: UUID? { store.nextTask?.id }
 
     private func taskLevel(for id: UUID, currentID: UUID?) -> NSWindow.Level {
         guard onlyCurrent else { return .floating }
@@ -361,7 +353,10 @@ final class FloatingPanelController: NSWindowController {
             todoPanels.removeValue(forKey: id)?.orderOut(nil)
         }
 
-        store.items.forEach(resizeTodoPanel)
+        for item in store.items {
+            _ = todoPanel(for: item)
+            resizeTodoPanel(id: item.id)
+        }
 
         updateOverlayPositions()
         updateAxisFrame()
@@ -450,11 +445,6 @@ final class FloatingPanelController: NSWindowController {
         return todoPanel
     }
 
-    private func resizeTodoPanel(_ item: TodoItem) {
-        _ = todoPanel(for: item)
-        resizeTodoPanel(id: item.id)
-    }
-
     private func resizeTodoPanel(id: UUID) {
         guard dragSession?.id != id else { return }
         guard let item = store.item(id: id), let taskPanel = todoPanels[id] else { return }
@@ -482,26 +472,8 @@ final class FloatingPanelController: NSWindowController {
         for minute: Int,
         viewportHeight: CGFloat
     ) -> CGFloat {
-        if let timelineProjection { return timelineProjection.centerY(for: minute) }
-        let currentMinute = DayClock.minuteOfDay(
-            for: store.clockDate,
-            dayEndMinute: store.timelineEndMinute
-        )
-        let anchorMinute = store.focusMinute ?? DayClock.quarterAtOrAfter(
-            currentMinute,
-            start: store.timelineStartMinute,
-            end: store.timelineEndMinute
-        )
-        return DaylineLayout.timelineCenterY(
-            minute: minute,
-            referenceMinute: anchorMinute,
-            referenceCenterY: DaylineLayout.timelineAnchorCenterY(
-                viewportHeight: viewportHeight,
-                fontSize: store.fontSize,
-                position: store.timelineAnchorPosition
-            ),
-            slotHeight: DaylineLayout.slotHeight(for: store.fontSize)
-        )
+        (timelineProjection ?? store.unmeasuredProjection(viewportHeight: viewportHeight))
+            .centerY(for: minute)
     }
 
     private func beginDragging(_ id: UUID, initialTranslation: CGFloat) {
@@ -610,11 +582,7 @@ final class FloatingPanelController: NSWindowController {
 
     private func returnToCurrentTime() {
         registerTimelineInteraction()
-        scrollToAnchor(DayClock.clamp(
-            DayClock.minuteOfDayFraction(for: Date(), dayEndMinute: store.timelineEndMinute),
-            start: store.timelineStartMinute,
-            end: store.timelineEndMinute
-        ))
+        scrollToAnchor(store.clampToRange(store.minuteFraction(at: Date())))
     }
 
     private func scrollAutoReturnTargetToAnchor(at date: Date? = nil) {
@@ -666,36 +634,19 @@ final class FloatingPanelController: NSWindowController {
     }
 
     private func timelineScrollView() -> NSScrollView? {
-        let scrollView = cachedTimelineScrollView
-            ?? panel.contentView?.firstDescendant(of: NSScrollView.self)
-        scrollView?.hasVerticalScroller = false
-        scrollView?.hasHorizontalScroller = false
-        cachedTimelineScrollView = scrollView
-        return scrollView
+        if cachedTimelineScrollView == nil {
+            cachedTimelineScrollView = panel.contentView?.firstDescendant(of: NSScrollView.self)
+        }
+        return cachedTimelineScrollView
     }
 
     func autoReturnTargetMinute(at date: Date) -> Double? {
-        let currentMinute = DayClock.minuteOfDayFraction(
-            for: date,
-            dayEndMinute: store.timelineEndMinute
-        )
+        let minute = store.minuteFraction(at: date)
+        let now = store.clampToRange(minute)
         switch store.autoReturnMode {
-        case .off:
-            return nil
-        case .currentTime:
-            return DayClock.clamp(
-                currentMinute,
-                start: store.timelineStartMinute,
-                end: store.timelineEndMinute
-            )
-        case .firstTodo:
-            let currentTask = store.currentTask(at: Int(currentMinute))
-            return currentTask.map { Double($0.minute) }
-                ?? DayClock.clamp(
-                    currentMinute,
-                    start: store.timelineStartMinute,
-                    end: store.timelineEndMinute
-                )
+        case .off: return nil
+        case .currentTime: return now
+        case .firstTodo: return store.currentTask(at: Int(minute)).map { Double($0.minute) } ?? now
         }
     }
 
@@ -824,133 +775,6 @@ final class FloatingPanelController: NSWindowController {
 
     private func screen(containing point: NSPoint) -> NSScreen? {
         NSScreen.screens.first { $0.frame.contains(point) }
-    }
-}
-
-final class GuardedClickArbiter {
-    private var sequence = 0
-
-    func resolve(
-        clickCount: Int,
-        delay: TimeInterval,
-        singleClick: @escaping () -> Void,
-        doubleClick: @escaping () -> Void
-    ) {
-        guard clickCount > 0 else { return }
-        sequence &+= 1
-        if clickCount.isMultiple(of: 2) {
-            doubleClick()
-            return
-        }
-
-        let pendingSequence = sequence
-        guard delay > 0 else {
-            singleClick()
-            return
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard self?.sequence == pendingSequence else { return }
-            singleClick()
-        }
-    }
-}
-
-private final class AxisRecallView: NSView {
-    var onSingleClick: (() -> Void)?
-    var onDoubleClick: (() -> Void)?
-    var onScroll: ((NSEvent) -> Void)?
-    var clickGuardDuration = { TimelineStore.defaultClickGuardDuration }
-    private let clickArbiter = GuardedClickArbiter()
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.white.withAlphaComponent(0.01).setFill()
-        dirtyRect.fill()
-    }
-
-    override func scrollWheel(with event: NSEvent) { onScroll?(event) }
-
-    override func mouseUp(with event: NSEvent) {
-        clickArbiter.resolve(
-            clickCount: event.clickCount,
-            delay: max(0, clickGuardDuration()),
-            singleClick: { [weak self] in self?.onSingleClick?() },
-            doubleClick: { [weak self] in self?.onDoubleClick?() }
-        )
-    }
-}
-
-struct WindowDragSurface: NSViewRepresentable {
-    let onClick: () -> Void
-    let onDragChanged: (NSPoint) -> Void
-    let onDragEnded: (NSPoint) -> Void
-
-    func makeNSView(context: Context) -> DragHandleView {
-        let view = DragHandleView()
-        updateNSView(view, context: context)
-        return view
-    }
-
-    func updateNSView(_ view: DragHandleView, context: Context) {
-        view.onClick = onClick
-        view.onDragChanged = onDragChanged
-        view.onDragEnded = onDragEnded
-    }
-
-    final class DragHandleView: NSView {
-        var onClick: (() -> Void)?
-        var onDragChanged: ((NSPoint) -> Void)?
-        var onDragEnded: ((NSPoint) -> Void)?
-        private var startPointer: NSPoint?
-        private var startOrigin: NSPoint?
-        private var startHandleCenter: NSPoint?
-        private var isDragging = false
-
-        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-        override func mouseDown(with event: NSEvent) {
-            startPointer = NSEvent.mouseLocation
-            startOrigin = window?.frame.origin
-            startHandleCenter = handleCenterOnScreen()
-            isDragging = false
-        }
-
-        override func mouseDragged(with event: NSEvent) {
-            guard let startPointer, let startOrigin, let startHandleCenter, let window else { return }
-            let pointer = NSEvent.mouseLocation
-            let dx = pointer.x - startPointer.x
-            let dy = pointer.y - startPointer.y
-            guard isDragging || hypot(dx, dy) >= 5 else { return }
-            isDragging = true
-            window.setFrameOrigin(NSPoint(x: startOrigin.x + dx, y: window.frame.minY))
-            onDragChanged?(NSPoint(x: startHandleCenter.x + dx, y: startHandleCenter.y + dy))
-        }
-
-        override func mouseUp(with event: NSEvent) {
-            let pointer = NSEvent.mouseLocation
-            if isDragging, let startPointer, let startHandleCenter {
-                onDragEnded?(
-                    NSPoint(
-                        x: startHandleCenter.x + pointer.x - startPointer.x,
-                        y: startHandleCenter.y + pointer.y - startPointer.y
-                    )
-                )
-            } else {
-                onClick?()
-            }
-            startPointer = nil
-            startOrigin = nil
-            startHandleCenter = nil
-            isDragging = false
-        }
-
-        private func handleCenterOnScreen() -> NSPoint? {
-            guard let window else { return nil }
-            let center = convert(NSPoint(x: bounds.midX, y: bounds.midY), to: nil)
-            return window.convertPoint(toScreen: center)
-        }
     }
 }
 

@@ -31,14 +31,7 @@ struct TodoPillView: View {
     }
 
     private var currentItem: TodoItem { store.item(id: item.id) ?? item }
-    private var isNext: Bool {
-        store.currentTask(
-            at: DayClock.minuteOfDay(
-                for: store.clockDate,
-                dayEndMinute: store.timelineEndMinute
-            )
-        )?.id == item.id
-    }
+    private var isNext: Bool { store.nextTask?.id == item.id }
     private var visibleMinute: Int { previewMinute ?? currentItem.minute }
     private var timeLabel: String {
         switch store.timeDisplayMode {
@@ -47,10 +40,7 @@ struct TodoPillView: View {
         case .remaining:
             return DayClock.displayRemaining(
                 taskMinute: visibleMinute,
-                currentMinute: DayClock.minuteOfDay(
-                    for: store.clockDate,
-                    dayEndMinute: store.timelineEndMinute
-                )
+                currentMinute: store.currentMinute
             )
         }
     }
@@ -64,12 +54,7 @@ struct TodoPillView: View {
         )
     }
     private var titleOverflows: Bool {
-        DaylineLayout.titleOverflowsCompact(
-            currentItem.title,
-            fontSize: store.fontSize,
-            titleHeightRatio: store.titleHeightRatio,
-            maximumWidth: compactTitleWidth
-        )
+        !currentItem.title.isEmpty && naturalTitleWidth > compactTitleWidth
     }
     private var displayedTitleWidth: CGFloat {
         if currentItem.isTitleExpanded {

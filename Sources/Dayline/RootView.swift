@@ -64,15 +64,7 @@ struct RootView: View {
     }
 
     private func addTask() {
-        let minute = DayClock.quarterAtOrAfter(
-            store.focusMinute ?? DayClock.defaultTaskMinute(
-                start: store.timelineStartMinute,
-                end: store.timelineEndMinute
-            ),
-            start: store.timelineStartMinute,
-            end: store.timelineEndMinute
-        )
-        let id = store.addTask(at: minute)
+        let id = store.addTask(at: store.focusMinute)
         store.focusMinute = store.item(id: id)!.minute
         store.editingID = id
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -111,7 +103,10 @@ private struct SideRail: View {
                     onBeforeAction()
                     showsSettings.toggle()
                 }
-                .popover(isPresented: $showsSettings) {
+                .popover(
+                    isPresented: $showsSettings,
+                    arrowEdge: store.dockEdge == .left ? .trailing : .leading
+                ) {
                     SettingsPopover(store: store)
                 }
             }

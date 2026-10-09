@@ -16,7 +16,9 @@ final class TimelineStore: ObservableObject {
     @Published var compactTitleWidth = Double(DaylineLayout.defaultCompactTitleWidth) {
         didSet { saveWhenReady() }
     }
-    @Published var panelHeightRatio: Double = 0.9 { didSet { saveWhenReady() } }
+    @Published var panelHeightRatio = Double(DaylineLayout.defaultExpandedPanelHeightRatio) {
+        didSet { saveWhenReady() }
+    }
     @Published var timelineAnchorPosition = DaylineLayout.defaultTimelineAnchorPosition {
         didSet { saveWhenReady() }
     }
@@ -40,6 +42,7 @@ final class TimelineStore: ObservableObject {
 
     private(set) var hasSavedPlacement = false
     private var savesChanges = false
+    private var pendingSave: DispatchWorkItem?
     private var clockTimer: Timer?
     private let stateURL: URL
 
@@ -65,14 +68,13 @@ final class TimelineStore: ObservableObject {
         title: String = "",
         at minute: Int? = nil
     ) -> UUID {
-        let preferred = minute ?? DayClock.defaultTaskMinute(
-            start: timelineStartMinute,
-            end: timelineEndMinute
-        )
         let item = TodoItem(
             id: id,
             title: title,
-            minute: availableQuarter(near: preferred),
+            minute: availableQuarter(near: minute ?? DayClock.defaultTaskMinute(
+                start: timelineStartMinute,
+                end: timelineEndMinute
+            )),
             createdAt: Date()
         )
         items.append(item)
@@ -83,11 +85,37 @@ final class TimelineStore: ObservableObject {
         items.first { $0.id == id }
     }
 
-    func currentTask(at minute: Int) -> TodoItem? {
-        let active = items.filter { !$0.isCompleted }.sorted {
+    var itemsByDeadline: [TodoItem] {
+        items.sorted {
             $0.minute == $1.minute ? $0.createdAt < $1.createdAt : $0.minute < $1.minute
         }
+    }
+
+    func currentTask(at minute: Int) -> TodoItem? {
+        let active = itemsByDeadline.filter { !$0.isCompleted }
         return active.first { $0.minute >= minute } ?? active.first
+    }
+
+    var currentMinute: Int {
+        DayClock.minuteOfDay(for: clockDate, dayEndMinute: timelineEndMinute)
+    }
+
+    var nextTask: TodoItem? { currentTask(at: currentMinute) }
+
+    func minuteFraction(at date: Date) -> Double {
+        DayClock.minuteOfDayFraction(for: date, dayEndMinute: timelineEndMinute)
+    }
+
+    func quarter(atOrAfter minute: Int) -> Int {
+        DayClock.quarterAtOrAfter(minute, start: timelineStartMinute, end: timelineEndMinute)
+    }
+
+    func quarter(atOrAfter minute: Double) -> Int {
+        DayClock.quarterAtOrAfter(minute, start: timelineStartMinute, end: timelineEndMinute)
+    }
+
+    func clampToRange(_ minute: Double) -> Double {
+        DayClock.clamp(minute, start: timelineStartMinute, end: timelineEndMinute)
     }
 
     func updateTitle(id: UUID, title: String) {
@@ -132,14 +160,7 @@ final class TimelineStore: ObservableObject {
     }
 
     func dragDestination(near minute: Double, excluding id: UUID) -> Int {
-        availableQuarter(
-            near: DayClock.quarterAtOrAfter(
-                minute,
-                start: timelineStartMinute,
-                end: timelineEndMinute
-            ),
-            excluding: id
-        )
+        availableQuarter(near: quarter(atOrAfter: minute), excluding: id)
     }
 
     func delete(id: UUID) {
@@ -161,13 +182,9 @@ final class TimelineStore: ObservableObject {
     }
 
     func setTimelineRange(start: Int, end: Int) {
-        let previouslySavedChanges = savesChanges
-        savesChanges = false
         timelineStartMinute = min(max(start, 0), 23 * 60)
         timelineEndMinute = min(max(end, timelineStartMinute + 60), 30 * 60)
         clampItemsToRange()
-        savesChanges = previouslySavedChanges
-        saveWhenReady()
     }
 
     func useInitialPlacement(edge: DockEdge, y: Double) {
@@ -177,7 +194,10 @@ final class TimelineStore: ObservableObject {
         hasSavedPlacement = true
     }
 
+    /// Writes immediately. Property changes call `saveWhenReady`, which coalesces bursts.
     func persist() {
+        pendingSave?.cancel()
+        pendingSave = nil
         let snapshot = SavedState(
             items: items,
             fontSize: fontSize,
@@ -213,27 +233,40 @@ final class TimelineStore: ObservableObject {
         change(&items[index])
     }
 
+    /// In-range tasks keep their slots; the farthest outliers claim edge slots first,
+    /// so tasks pushed in from outside keep their relative order without colliding.
     private func clampItemsToRange() {
+        let lastSlot = timelineEndMinute - 15
+        func overflow(_ minute: Int) -> Int {
+            max(timelineStartMinute - minute, minute - lastSlot, 0)
+        }
+        let placementOrder = items.sorted {
+            let (a, b) = (overflow($0.minute), overflow($1.minute))
+            return (a == 0) != (b == 0) ? a == 0 : a > b
+        }
+        var occupied = Set<Int>()
+        var placed: [UUID: Int] = [:]
+        for item in placementOrder {
+            let minute = availableQuarter(near: item.minute, occupied: occupied)
+            occupied.insert(minute)
+            placed[item.id] = minute
+        }
         items = items.map { item in
             var copy = item
-            copy.minute = DayClock.quarterAtOrAfter(
-                item.minute,
-                start: timelineStartMinute,
-                end: timelineEndMinute
-            )
+            copy.minute = placed[item.id] ?? item.minute
             return copy
         }
     }
 
     private func availableQuarter(near minute: Int, excluding id: UUID? = nil) -> Int {
-        let target = DayClock.quarterAtOrAfter(
-            minute,
-            start: timelineStartMinute,
-            end: timelineEndMinute
+        availableQuarter(
+            near: minute,
+            occupied: Set(items.compactMap { $0.id == id ? nil : $0.minute })
         )
-        let occupied = Set(items.compactMap { item in
-            item.id == id ? nil : item.minute
-        })
+    }
+
+    private func availableQuarter(near minute: Int, occupied: Set<Int>) -> Int {
+        let target = quarter(atOrAfter: minute)
         for candidate in stride(from: target, through: timelineEndMinute - 15, by: 15)
         where !occupied.contains(candidate) {
             return candidate
@@ -254,23 +287,24 @@ final class TimelineStore: ObservableObject {
                 SavedState.self,
                 from: Data(contentsOf: stateURL)
             )
+            // Absent fields keep the property defaults declared above.
             fontSize = saved.fontSize
-            titleHeightRatio = saved.titleHeightRatio ?? DaylineLayout.defaultTitleHeightRatio
-            compactTitleWidth = saved.compactTitleWidth ?? Double(DaylineLayout.defaultCompactTitleWidth)
-            panelHeightRatio = saved.panelHeightRatio ?? 0.9
-            timelineAnchorPosition = saved.timelineAnchorPosition ?? DaylineLayout.defaultTimelineAnchorPosition
-            nativeGlassStyle = saved.nativeGlassStyle ?? .regular
-            timeDisplayMode = saved.timeDisplayMode ?? .absolute
-            pinsOnlyCurrentTask = saved.pinsOnlyCurrentTask ?? false
-            clickGuardDuration = saved.clickGuardDuration ?? Self.defaultClickGuardDuration
+            titleHeightRatio = saved.titleHeightRatio ?? titleHeightRatio
+            compactTitleWidth = saved.compactTitleWidth ?? compactTitleWidth
+            panelHeightRatio = saved.panelHeightRatio ?? panelHeightRatio
+            timelineAnchorPosition = saved.timelineAnchorPosition ?? timelineAnchorPosition
+            nativeGlassStyle = saved.nativeGlassStyle ?? nativeGlassStyle
+            timeDisplayMode = saved.timeDisplayMode ?? timeDisplayMode
+            pinsOnlyCurrentTask = saved.pinsOnlyCurrentTask ?? pinsOnlyCurrentTask
+            clickGuardDuration = saved.clickGuardDuration ?? clickGuardDuration
             autoReturnMode = saved.autoReturnMode
                 ?? ((saved.autoReturnToCurrentTime ?? false) ? .currentTime : .off)
-            autoReturnDelay = saved.autoReturnDelay ?? Self.defaultAutoReturnDelay
+            autoReturnDelay = saved.autoReturnDelay ?? autoReturnDelay
             dockEdge = saved.dockEdge
             dockY = saved.dockY
             isExpanded = saved.isExpanded
-            timelineStartMinute = saved.timelineStartMinute ?? DayClock.startMinute
-            timelineEndMinute = saved.timelineEndMinute ?? DayClock.endMinute
+            timelineStartMinute = saved.timelineStartMinute ?? timelineStartMinute
+            timelineEndMinute = saved.timelineEndMinute ?? timelineEndMinute
             hasSavedPlacement = true
             items = saved.items
             clampItemsToRange()
@@ -280,7 +314,11 @@ final class TimelineStore: ObservableObject {
     }
 
     private func saveWhenReady() {
-        if savesChanges { persist() }
+        guard savesChanges else { return }
+        pendingSave?.cancel()
+        let save = DispatchWorkItem { [weak self] in self?.persist() }
+        pendingSave = save
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: save)
     }
 
     private static var defaultStateURL: URL {

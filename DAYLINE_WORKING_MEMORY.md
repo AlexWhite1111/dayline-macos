@@ -135,3 +135,31 @@ physical drag and saved preferences. Verify build and the native review fixture.
 Build 54 installation: committed as e785976, tagged v0.2.8-build54, installed and
 launched from /Applications/今日.app. All three installed binaries match the package;
 strict signature verification passed. Build 53 is retained in work/install-build54.
+
+## Alignment — 2026-10-09 refactor and save coalescing (branch refactor/cleanup-build55)
+
+Intent: remove repeated range/clock plumbing, stop per-keystroke disk writes, fix
+an automation crash and a range-shrink collision. Owners unchanged.
+
+- Automation: update/set-completed/delete with an unknown UUID now return
+  `ok: false` ("找不到这个待办") instead of force-unwrapping and crashing the app.
+- Store saves are coalesced: `didSet` schedules one write 0.4 s after the last
+  change; `persist()` writes immediately and `applicationWillTerminate` calls it.
+  Removed the `savesChanges` toggle inside `setTimelineRange`.
+- Range shrink places tasks through Store collision rules: in-range tasks keep
+  slots, farthest outliers claim edge slots first so relative order survives.
+- Store helpers `currentMinute`, `nextTask`, `itemsByDeadline`, `minuteFraction(at:)`,
+  `quarter(atOrAfter:)`, `clampToRange` replace repeated start/end plumbing.
+  `TimelineStore.unmeasuredProjection` is the single pre-measurement projection
+  (was duplicated in TimelineView and FloatingPanel). Restore defaults come from
+  the property declarations.
+- Scroll indicators hidden with `.scrollIndicators(.never)`; the controller no
+  longer mutates `hasVerticalScroller`.
+- `GuardedClickArbiter`, `AxisRecallView`, `WindowDragSurface` moved unchanged to
+  `InputViews.swift`.
+- Settings popover opens toward the screen interior (`arrowEdge` by dock edge).
+
+Verification: `./scripts/check.sh` passed (50 tests incl. 3 new: unknown-ID
+automation, range-shrink order, burst save). Not packaged/installed; popover
+arrow, scroll-indicator hiding and quit-save need installed-app observation.
+Deferred: auto-return sink merge, single owner for drag preview minute.

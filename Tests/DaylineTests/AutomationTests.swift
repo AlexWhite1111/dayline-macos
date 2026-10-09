@@ -144,6 +144,23 @@ final class AutomationControllerTests: XCTestCase {
         XCTAssertEqual(updated.todos.first?.time, time)
     }
 
+    func testUnknownTodoIDFailsInsteadOfCrashing() {
+        let (store, stateURL) = makeStore()
+        defer { try? FileManager.default.removeItem(at: stateURL.deletingLastPathComponent()) }
+        let controller = AutomationController(store: store)
+        let missing = UUID()
+
+        for request in [
+            DaylineAutomationRequest(action: .update, itemID: missing, title: "旧"),
+            DaylineAutomationRequest(action: .setCompleted, itemID: missing, completed: true),
+            DaylineAutomationRequest(action: .delete, itemID: missing)
+        ] {
+            let response = controller.execute(request)
+            XCTAssertFalse(response.ok)
+            XCTAssertNotNil(response.error)
+        }
+    }
+
     private func makeStore() -> (TimelineStore, URL) {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)

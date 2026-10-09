@@ -44,4 +44,40 @@ final class TimelineStoreCurrentTaskTests: XCTestCase {
         XCTAssertEqual(preview, 10 * 60 + 30)
         XCTAssertEqual(store.item(id: dragged)?.minute, preview)
     }
+
+    func testShrinkingRangeKeepsTasksInSeparateSlotsAndOrder() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("timeline.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let store = TimelineStore(stateURL: url, startsTimer: false)
+        let earliest = store.addTask(title: "最早", at: 7 * 60)
+        let early = store.addTask(title: "较早", at: 7 * 60 + 15)
+        let inside = store.addTask(title: "中间", at: 12 * 60)
+        let late = store.addTask(title: "较晚", at: 23 * 60)
+        let later = store.addTask(title: "更晚", at: 23 * 60 + 30)
+
+        store.setTimelineRange(start: 9 * 60, end: 22 * 60)
+
+        XCTAssertEqual(store.item(id: earliest)?.minute, 9 * 60)
+        XCTAssertEqual(store.item(id: early)?.minute, 9 * 60 + 15)
+        XCTAssertEqual(store.item(id: inside)?.minute, 12 * 60)
+        XCTAssertEqual(store.item(id: late)?.minute, 21 * 60 + 30)
+        XCTAssertEqual(store.item(id: later)?.minute, 21 * 60 + 45)
+    }
+
+    func testChangesAreSavedOnceAfterABurst() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("timeline.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let store = TimelineStore(stateURL: url, startsTimer: false)
+        for size in stride(from: 10.0, through: 15.0, by: 0.5) { store.fontSize = size }
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+
+        let restored = TimelineStore(stateURL: url, startsTimer: false)
+        XCTAssertEqual(restored.fontSize, 15)
+    }
 }

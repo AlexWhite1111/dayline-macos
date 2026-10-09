@@ -17,11 +17,6 @@ struct TimelineView: View {
             let viewportAnchor = DaylineLayout.timelineViewportAnchor(
                 position: store.timelineAnchorPosition
             )
-            let anchorY = DaylineLayout.timelineAnchorCenterY(
-                viewportHeight: geometry.size.height,
-                fontSize: fontSize,
-                position: store.timelineAnchorPosition
-            )
             let topInset = max(0, (geometry.size.height - slotHeight) * viewportAnchor)
             let bottomInset = max(
                 0,
@@ -34,20 +29,9 @@ struct TimelineView: View {
                     by: 15
                 )
             )
-            let currentMinute = DayClock.minuteOfDay(
-                for: store.clockDate,
-                dayEndMinute: store.timelineEndMinute
-            )
-            let anchor = focusMinute ?? DayClock.quarterAtOrAfter(
-                currentMinute,
-                start: store.timelineStartMinute,
-                end: store.timelineEndMinute
-            )
-            let projection = measuredProjection ?? TimelineProjection(
-                firstMinute: anchor,
-                firstCenterY: anchorY,
-                fontSize: fontSize
-            )
+            let currentMinute = store.currentMinute
+            let projection = measuredProjection
+                ?? store.unmeasuredProjection(viewportHeight: geometry.size.height)
             let returnEdge = Self.currentTimeReturnEdge(
                 minute: currentMinute,
                 projection: projection,
@@ -79,6 +63,7 @@ struct TimelineView: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
+                .scrollIndicators(.never)
                 .scrollPosition(
                     id: $focusMinute,
                     anchor: UnitPoint(x: 0.5, y: viewportAnchor)
@@ -181,12 +166,23 @@ struct TimelineView: View {
         var transaction = Transaction()
         transaction.animation = nil
         withTransaction(transaction) {
-            focusMinute = DayClock.quarterAtOrAfter(
-                minute,
-                start: store.timelineStartMinute,
-                end: store.timelineEndMinute
-            )
+            focusMinute = store.quarter(atOrAfter: minute)
         }
+    }
+}
+
+extension TimelineStore {
+    /// Projection used before the scroll view reports its first measurement.
+    func unmeasuredProjection(viewportHeight: CGFloat) -> TimelineProjection {
+        TimelineProjection(
+            firstMinute: focusMinute ?? quarter(atOrAfter: currentMinute),
+            firstCenterY: DaylineLayout.timelineAnchorCenterY(
+                viewportHeight: viewportHeight,
+                fontSize: fontSize,
+                position: timelineAnchorPosition
+            ),
+            fontSize: fontSize
+        )
     }
 }
 

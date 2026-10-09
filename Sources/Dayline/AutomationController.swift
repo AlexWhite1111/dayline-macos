@@ -23,7 +23,7 @@ final class AutomationController {
                 return success(request.action, todos: [todo(id)])
 
             case .update:
-                let id = try requiredID(request.itemID)
+                let id = try existingID(request.itemID)
                 if let title = request.title { store.updateTitle(id: id, title: try requiredTitle(title)) }
                 if let time = request.time { store.move(id: id, to: try parseTime(time)) }
                 return success(request.action, todos: [todo(id)])
@@ -39,13 +39,13 @@ final class AutomationController {
                 )
 
             case .setCompleted:
-                let id = try requiredID(request.itemID)
+                let id = try existingID(request.itemID)
                 guard let completed = request.completed else { throw Failure("缺少 completed。") }
                 store.setCompleted(id: id, completed: completed)
                 return success(request.action, todos: [todo(id)])
 
             case .delete:
-                let id = try requiredID(request.itemID)
+                let id = try existingID(request.itemID)
                 store.delete(id: id)
                 return success(request.action, message: "已删除待办。")
             }
@@ -88,9 +88,7 @@ final class AutomationController {
     }
 
     private func allTodos() -> [DaylineAutomationTodo] {
-        store.items
-            .sorted { $0.minute == $1.minute ? $0.createdAt < $1.createdAt : $0.minute < $1.minute }
-            .map(makeTodo)
+        store.itemsByDeadline.map(makeTodo)
     }
 
     private func makeTodo(_ item: TodoItem) -> DaylineAutomationTodo {
@@ -104,8 +102,9 @@ final class AutomationController {
         )
     }
 
-    private func requiredID(_ value: UUID?) throws -> UUID {
+    private func existingID(_ value: UUID?) throws -> UUID {
         guard let value else { throw Failure("缺少有效的待办 ID。") }
+        guard store.item(id: value) != nil else { throw Failure("找不到这个待办，请先 list。") }
         return value
     }
 
