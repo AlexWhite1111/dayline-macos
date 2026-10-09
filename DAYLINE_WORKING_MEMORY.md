@@ -81,3 +81,57 @@ does not immediately override an explicit return-to-now action. No scroll view,
 offset state, timer, or gesture was added. Removed the scheduler's duplicate delay
 clamp. The native-scroll regression covers fractional time at the 97% anchor,
 unchanged focus ID and a repeated return after partial scrolling.
+
+## Alignment — 2026-10-03 right-dock capsule spacing
+
+Intent: right-docked capsules and their drag connector should mirror the accepted
+left-dock geometry. `FloatingItemGeometry.taskFrame` currently uses an 8-point
+right inset versus an 18-point left inset, producing a 1-point right axis gap for
+an 11-point connector and overlapping the axis input lane by 2 points. Use the
+existing `pillInset` on both sides and remove unused `pillOuterInset`. Preserve
+axis/window owners, all gestures, native glass, task sizes and vertical projection.
+Add a mirror/connector/hit-lane regression over compact and expanded widths; physical
+right-dock acceptance and build-55 packaging remain separate from source tests.
+
+## Alignment — 2026-10-03 native editing and task accessibility
+
+Intent: restore standard macOS editing shortcuts and make title editing/time
+selection discoverable to accessibility users. Existing AppDelegate menu owns
+keyboard command routing; TodoPillView.beginEditing and TimeMenuInteraction's
+native menu remain the sole edit/menu actions. Add an Edit menu using responder
+chain selectors, title edit accessibility action, and native time-control AX
+role/value/press plus a concise pointer hint. Preserve physical double-click
+arbitration, task focus, layout, and persistence; add no gesture or state owner.
+Verification needed: build/tests and isolated native menu dispatch; real installed
+text entry and VoiceOver acceptance remain separate from source checks.
+
+Implemented only the right-side `taskFrame` inset replacement in `Domain.swift`
+and removed `pillOuterInset`. The new geometry test first reproduced the 1-point
+gap and input-lane intersection at three widths, then passed after the fix.
+`swift test --filter ControlRailGeometryTests` passed all 12 tests with no warnings
+or failures; `git diff --check` passed. Right-docked capsules now move 10 points
+away from the axis, matching left docking and the existing 11-point connector.
+This source check did not package, install, launch, or mutate the live app; parent
+owns aggregate checks and real UI verification for the next delivery.
+
+Native editing/accessibility implementation: changed `DaylineApp.swift` and
+`TodoPillView.swift`. Standard Edit commands have nil targets so AppKit selects the
+current responder; redo uses Command-Shift-Z. Title AX edit calls `beginEditing`.
+The existing native time view exposes a popup-button role, absolute deadline value,
+and press action that invokes its existing menu; its decorative text is AX-hidden.
+Added short title/time pointer hints. No new gesture, focus state, or menu renderer.
+`swift build` and `git diff --check` passed. An isolated native menu fixture verified
+all six responder-chain selectors and redo modifiers without clipboard or live-app
+access. Actual installed keyboard/VoiceOver behavior remains for parent UI review.
+
+## Alignment — 2026-10-03 task entry and control clarity
+
+New-task editing must follow the collision-resolved deadline into view. RootView
+will set its existing focusMinute to the created item before setting editingID.
+Keep Store placement and the single timeline scroll binding. Label the size slider
+and give the existing edge-handle click an accessibility action. Preserve layout,
+physical drag and saved preferences. Verify build and the native review fixture.
+
+Build 54 installation: committed as e785976, tagged v0.2.8-build54, installed and
+launched from /Applications/今日.app. All three installed binaries match the package;
+strict signature verification passed. Build 53 is retained in work/install-build54.

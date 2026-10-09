@@ -178,7 +178,6 @@ enum DaylineLayout {
     static let railButtonSpacing: CGFloat = 6
     static let timelineAxisInset: CGFloat = 7
     static let pillInset: CGFloat = 18
-    static let pillOuterInset: CGFloat = 8
     static let pillWindowPadding: CGFloat = 20
     static let pillDeleteWidth: CGFloat = 14
     static let currentTimeButtonHitSize: CGFloat = 24
@@ -361,7 +360,7 @@ enum FloatingItemGeometry {
         let timeline = timelineFrame(in: panelFrame, edge: edge)
         let x = edge == .left
             ? timeline.minX + DaylineLayout.pillInset - DaylineLayout.pillWindowPadding
-            : timeline.maxX - DaylineLayout.pillOuterInset
+            : timeline.maxX - DaylineLayout.pillInset
                 + DaylineLayout.pillWindowPadding - taskSize.width
         return NSRect(
             x: x,

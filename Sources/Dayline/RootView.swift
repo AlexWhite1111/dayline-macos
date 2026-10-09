@@ -72,7 +72,9 @@ struct RootView: View {
             start: store.timelineStartMinute,
             end: store.timelineEndMinute
         )
-        store.editingID = store.addTask(at: minute)
+        let id = store.addTask(at: minute)
+        store.focusMinute = store.item(id: id)!.minute
+        store.editingID = id
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
@@ -164,6 +166,8 @@ private struct EdgeHandle: View {
                     onDragEnded: onDragEnded
                 )
             }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { onClick() }
             .help("点击收放 · 拖动停靠")
             .accessibilityLabel("时间轴还有 \(pendingCount) 项待办，点击收放，拖动改变位置")
     }
@@ -190,6 +194,7 @@ private struct SettingsPopover: View {
                     Text("A").font(.system(size: 11, weight: .medium))
                     Slider(value: $store.fontSize, in: DaylineLayout.fontSizeRange, step: 0.5)
                         .controlSize(.small)
+                        .accessibilityLabel("尺寸")
                     Text("A").font(.system(size: 18, weight: .medium))
                 }
             }

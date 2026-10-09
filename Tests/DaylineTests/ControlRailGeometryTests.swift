@@ -207,6 +207,28 @@ final class ControlRailGeometryTests: XCTestCase {
         XCTAssertEqual(rightLane.maxX - (rightTimeline.maxX - 7), 7)
     }
 
+    func testPillAxisGapMirrorsAndLeavesInputLaneClear() {
+        let panel = NSRect(x: 100, y: 50, width: 398, height: 680)
+        for width: CGFloat in [140, 300, 600] {
+            for edge in [DockEdge.left, .right] {
+                let timeline = FloatingItemGeometry.timelineFrame(in: panel, edge: edge)
+                let lane = FloatingItemGeometry.axisHitFrame(in: panel, edge: edge)
+                let task = FloatingItemGeometry.taskFrame(
+                    in: panel, edge: edge, centerY: 200,
+                    taskSize: NSSize(width: width, height: 80)
+                ).insetBy(dx: DaylineLayout.pillWindowPadding, dy: DaylineLayout.pillWindowPadding)
+                let axisX = edge == .left
+                    ? timeline.minX + DaylineLayout.timelineAxisInset
+                    : timeline.maxX - DaylineLayout.timelineAxisInset
+                let gap = edge == .left ? task.minX - axisX : axisX - task.maxX
+
+                XCTAssertEqual(gap, DaylineLayout.axisToPillGap, accuracy: 0.001)
+                XCTAssertFalse(task.intersects(lane))
+                XCTAssertEqual(task.midY, timeline.maxY - 200, accuracy: 0.001)
+            }
+        }
+    }
+
     func testExpandedPanelUsesConfiguredSafeWorkspaceRatio() {
         XCTAssertEqual(
             DaylineLayout.expandedPanelHeight(availableHeight: 1000),

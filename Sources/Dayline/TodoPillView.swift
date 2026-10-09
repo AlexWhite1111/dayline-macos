@@ -203,6 +203,8 @@ struct TodoPillView: View {
                 .allowsHitTesting(!isEditing)
                 .accessibilityHidden(isEditing)
                 .onTapGesture(count: 2, perform: beginEditing)
+                .accessibilityAction(named: Text("编辑标题"), beginEditing)
+                .help("双击编辑标题")
 
             TextField("要做什么？", text: titleBinding)
                 .textFieldStyle(.plain)
@@ -247,6 +249,7 @@ struct TodoPillView: View {
             .frame(width: Metrics.timeWidth)
             .padding(.vertical, 1)
             .contentShape(Capsule())
+            .accessibilityHidden(true)
             .overlay {
                 TimeMenuInteraction(
                     startMinute: store.timelineStartMinute,
@@ -266,7 +269,7 @@ struct TodoPillView: View {
                 )
             }
             .fixedSize()
-            .accessibilityLabel("时间 \(timeLabel)")
+            .help("单击调整截止时间 · 双击切换时间显示")
     }
 
     private var titleBinding: Binding<String> {
@@ -343,13 +346,18 @@ private struct TimeMenuInteraction: NSViewRepresentable {
     let onDoubleClick: () -> Void
 
     func makeNSView(context: Context) -> InteractionView {
-        InteractionView()
+        let view = InteractionView()
+        view.setAccessibilityElement(true)
+        view.setAccessibilityRole(.popUpButton)
+        view.setAccessibilityLabel("截止时间")
+        return view
     }
 
     func updateNSView(_ view: InteractionView, context: Context) {
         view.startMinute = startMinute
         view.endMinute = endMinute
         view.selectedMinute = selectedMinute
+        view.setAccessibilityValue(DayClock.displayRangeTime(selectedMinute))
         view.clickGuardDuration = clickGuardDuration
         view.onSelectMinute = onSelectMinute
         view.onDoubleClick = onDoubleClick
@@ -375,6 +383,11 @@ private struct TimeMenuInteraction: NSViewRepresentable {
                 singleClick: { [weak self] in self?.presentMenu(at: anchor) },
                 doubleClick: { [weak self] in self?.onDoubleClick?() }
             )
+        }
+
+        override func accessibilityPerformPress() -> Bool {
+            presentMenu(at: NSPoint(x: bounds.midX, y: bounds.midY))
+            return true
         }
 
         @objc private func selectMinute(_ sender: NSMenuItem) {
