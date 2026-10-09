@@ -261,3 +261,17 @@ Verification: check.sh passed — 66 tests (9 new API tests) and MCP smoke incl.
 tools-list of ten tools and two type-error calls. Not yet packaged; live CLI/MCP
 against an installed build, show/reveal motion and launch-at-login via API remain
 unverified.
+
+Build 57: live testing of the installed build found that toggling the full-screen
+switch changed collection behavior without re-ordering windows, so only the axis
+panel joined (and stayed in) another app's full-screen Space. Fixed: the switch
+orders every panel out and back through the normal show paths; launch applies the
+saved behavior to the main and axis panels. Re-packaged and reinstalled as 57.
+Live verification on /Applications/今日.app build 57 (all three binaries match the
+package, strict signature ok): CLI settings/list/set/show and error codes
+(invalid_request, not_found, invalid_time) behaved as specified; a bad enum left
+fontSize unchanged; MCP initialize/get_settings/list_todos returned 18 settings and
+now/nextTodoID. Full-screen toggling moved all 3 windows in and out of the
+full-screen Space four times (0→3→0→3→0); show with the switch off left none there.
+Settings were restored and todos are unchanged. Build 56 backup: work/install-build57/.
+Launch-at-login via API and show/reveal motion remain unobserved.

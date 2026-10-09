@@ -103,6 +103,9 @@ final class FloatingPanelController: NSWindowController {
 
         resolveFirstPlacementIfNeeded()
         configureAxisPanel()
+        let behavior = Self.spacesBehavior(showsOverFullScreen: store.showsOverFullScreen)
+        panel.collectionBehavior = behavior
+        axisPanel.collectionBehavior = behavior
 
         let hostingView = NSHostingView(
             rootView: RootView(
@@ -249,12 +252,19 @@ final class FloatingPanelController: NSWindowController {
 
         store.$showsOverFullScreen
             .removeDuplicates()
+            .dropFirst()
             .sink { [weak self] shows in
                 guard let self else { return }
                 let behavior = Self.spacesBehavior(showsOverFullScreen: shows)
-                ([self.panel, self.axisPanel] + Array(self.todoPanels.values))
-                    .forEach { $0.collectionBehavior = behavior }
+                // Spaces membership is decided when a window is ordered in, so hide every
+                // panel and let the normal paths show them again under the new behavior.
+                let windows = [self.panel, self.axisPanel] + Array(self.todoPanels.values)
+                windows.forEach {
+                    $0.collectionBehavior = behavior
+                    $0.orderOut(nil)
+                }
                 self.refreshWindowLevels()
+                self.scheduleOverlayUpdate(reconcile: true)
             }
             .store(in: &subscriptions)
 
