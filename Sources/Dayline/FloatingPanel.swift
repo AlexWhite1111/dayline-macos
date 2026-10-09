@@ -56,6 +56,8 @@ final class FloatingPanelController: NSWindowController {
     private(set) var autoReturnIsActive = false
     /// Set by "return to now"; first-todo follow tracks now until the next interaction.
     private var followsNow = false
+    /// The pending scroll of the latest `reveal`; newer reveals and user input cancel it.
+    private var revealWorkItem: DispatchWorkItem?
 
     private let collapsedSize = NSSize(width: 48, height: 44)
     private let edgeInset: CGFloat = 2
@@ -601,6 +603,8 @@ final class FloatingPanelController: NSWindowController {
     /// Restarts the inactivity countdown; editing keeps it paused until it ends.
     private func registerTimelineInteraction() {
         followsNow = false
+        revealWorkItem?.cancel()
+        revealWorkItem = nil
         guard store.autoReturnMode != .off else { return }
         autoReturnIsActive = false
         scheduleAutoReturn()
@@ -849,15 +853,23 @@ extension FloatingPanelController: TimelinePanelControlling {
         let minute = id.flatMap { store.item(id: $0)?.minute }
         store.focusMinute = minute ?? store.quarter(atOrAfter: store.currentMinute)
         refreshWindowLevels()
+        revealWorkItem?.cancel()
         // A freshly expanded timeline needs one layout pass before direct scrolling.
-        DispatchQueue.main.asyncAfter(deadline: .now() + (wasExpanded ? 0 : 0.2)) { [weak self] in
+        let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            if let minute {
+            if let id, let minute = self.store.item(id: id)?.minute {
                 self.registerTimelineInteraction()
                 self.scrollToAnchor(Double(minute))
             } else {
                 self.returnToCurrentTime()
             }
+            // Explicit reveal brings the timeline forward even in pin-current mode;
+            // the axis input window must stay in front of the main panel.
+            self.panel.orderFrontRegardless()
+            if let id { self.todoPanels[id]?.orderFrontRegardless() }
+            self.axisPanel.orderFrontRegardless()
         }
+        revealWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + (wasExpanded ? 0 : 0.2), execute: work)
     }
 }

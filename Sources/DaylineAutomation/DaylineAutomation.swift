@@ -153,6 +153,17 @@ public struct DaylineAutomationRequest: Codable, Sendable {
         settings = try values["settings"].map { try Self.decodeJSON(DaylineAutomationSettings.self, $0) }
     }
 
+    /// Request ID and action of a URL whose other parameters failed to parse, so the
+    /// app can still answer instead of leaving the caller to time out.
+    public static func identity(of url: URL) -> (requestID: UUID, action: DaylineAutomationAction)? {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
+        guard let id = value("request").flatMap(UUID.init(uuidString:)),
+              let action = value("action").flatMap(DaylineAutomationAction.init(rawValue:))
+        else { return nil }
+        return (id, action)
+    }
+
     private static func decodeJSON<T: Decodable>(_ type: T.Type, _ value: String) throws -> T {
         do {
             return try JSONDecoder().decode(type, from: Data(value.utf8))
@@ -203,8 +214,9 @@ public struct DaylineAutomationTimeline: Codable, Sendable {
     public let end: String
     public let intervalMinutes: Int
     /// Current time on the cyclic timeline, including next-day overflow.
-    public let nowMinute: Int
-    public let now: String
+    /// Optional so responses from older app builds still decode.
+    public let nowMinute: Int?
+    public let now: String?
     /// The next incomplete todo by the app's cyclic rule, wrapping past the end.
     public let nextTodoID: UUID?
 
@@ -214,9 +226,9 @@ public struct DaylineAutomationTimeline: Codable, Sendable {
         start: String,
         end: String,
         intervalMinutes: Int,
-        nowMinute: Int,
-        now: String,
-        nextTodoID: UUID?
+        nowMinute: Int? = nil,
+        now: String? = nil,
+        nextTodoID: UUID? = nil
     ) {
         self.startMinute = startMinute
         self.endMinute = endMinute

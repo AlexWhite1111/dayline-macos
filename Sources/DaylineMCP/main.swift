@@ -100,12 +100,12 @@ private final class MCPServer {
                 action: .add,
                 itemID: UUID(),
                 title: title,
-                time: arguments["time"] as? String
+                time: try optionalString("time", in: arguments)
             )
         case "update_todo":
             let id = try uuid(in: arguments)
-            let title = arguments["title"] as? String
-            let time = arguments["time"] as? String
+            let title = try optionalString("title", in: arguments)
+            let time = try optionalString("time", in: arguments)
             return DaylineAutomationRequest(action: .update, itemID: id, title: title, time: time)
         case "set_timeline_range":
             return DaylineAutomationRequest(
@@ -125,14 +125,14 @@ private final class MCPServer {
         case "delete_todo":
             return DaylineAutomationRequest(action: .delete, itemID: try uuid(in: arguments))
         case "add_todos":
-            guard let items = arguments["todos"] as? [[String: Any]], !items.isEmpty else {
-                throw RPCError(code: -32602, message: "Missing todos")
-            }
-            let todos = try items.map { item -> DaylineAutomationNewTodo in
-                guard let title = item["title"] as? String else {
-                    throw RPCError(code: -32602, message: "Each todo needs a title")
-                }
-                return DaylineAutomationNewTodo(title: title, time: item["time"] as? String)
+            guard let items = arguments["todos"], JSONSerialization.isValidJSONObject(["todos": items]),
+                  let todos = try? JSONDecoder().decode(
+                      [DaylineAutomationNewTodo].self,
+                      from: JSONSerialization.data(withJSONObject: items)
+                  ),
+                  !todos.isEmpty
+            else {
+                throw RPCError(code: -32602, message: "todos must be a non-empty array of {title, time?} strings")
             }
             return DaylineAutomationRequest(action: .addMany, todos: todos)
         case "get_settings":
@@ -144,12 +144,7 @@ private final class MCPServer {
             }
             return DaylineAutomationRequest(action: .updateSettings, settings: settings)
         case "show_timeline":
-            let id = try (arguments["id"] as? String).map { value -> UUID in
-                guard let id = UUID(uuidString: value) else {
-                    throw RPCError(code: -32602, message: "Invalid id")
-                }
-                return id
-            }
+            let id = arguments["id"] == nil ? nil : try uuid(in: arguments)
             return DaylineAutomationRequest(action: .show, itemID: id)
         default:
             throw RPCError(code: -32602, message: "Unknown tool: \(tool)")
@@ -161,6 +156,15 @@ private final class MCPServer {
             throw RPCError(code: -32602, message: "Missing \(name)")
         }
         return value
+    }
+
+    /// Absent is nil; present with another type is an error rather than silently ignored.
+    private func optionalString(_ name: String, in arguments: [String: Any]) throws -> String? {
+        guard let value = arguments[name] else { return nil }
+        guard let string = value as? String else {
+            throw RPCError(code: -32602, message: "\(name) must be a string")
+        }
+        return string
     }
 
     private func uuid(in arguments: [String: Any]) throws -> UUID {

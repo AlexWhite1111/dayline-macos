@@ -63,6 +63,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try DaylineAutomationResponses.write(response, for: request.requestID)
         } catch {
             NSLog("Dayline automation failed: \(error.localizedDescription)")
+            guard let identity = DaylineAutomationRequest.identity(of: url) else { return }
+            try? DaylineAutomationResponses.write(
+                DaylineAutomationResponse(
+                    ok: false,
+                    action: identity.action,
+                    error: error.localizedDescription,
+                    errorCode: .invalidRequest
+                ),
+                for: identity.requestID
+            )
         }
     }
 

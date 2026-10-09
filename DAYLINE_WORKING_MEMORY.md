@@ -248,3 +248,16 @@ Owners: protocol in DaylineAutomation; AutomationController maps to Store and a
 narrow panel protocol implemented by FloatingPanelController, which now applies
 frame changes from Store publishers (dock edge/position, expanded) so any writer
 takes effect. Store stays the only persisted state owner.
+
+Implemented as aligned. Codex cross-review (codex exec, read-only, main..HEAD) found
+six defects, all confirmed and fixed: new response fields optional for older apps;
+`reveal` uses one cancellable work item (newer reveals and user input cancel it)
+and brings main/target/axis forward after scrolling; clock values must be 00:00–
+30:00 with minutes < 60 (non-quarter minutes still round up); MCP rejects present-
+but-wrong-typed arguments and decodes add_todos with the shared Codable type; URLs
+whose JSON parameters fail still get an invalid_request response via
+`DaylineAutomationRequest.identity(of:)`.
+Verification: check.sh passed — 66 tests (9 new API tests) and MCP smoke incl.
+tools-list of ten tools and two type-error calls. Not yet packaged; live CLI/MCP
+against an installed build, show/reveal motion and launch-at-login via API remain
+unverified.

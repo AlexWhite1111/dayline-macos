@@ -278,8 +278,10 @@ final class AutomationController {
 
     private func parseClock(_ value: String?) throws -> Int {
         let parts = value?.split(separator: ":", omittingEmptySubsequences: false) ?? []
-        guard parts.count == 2, let hour = Int(parts[0]), let minute = Int(parts[1]) else {
-            throw Failure(.invalidTime, "缺少 HH:mm 时间。")
+        guard parts.count == 2, let hour = Int(parts[0]), let minute = Int(parts[1]),
+              (0...30).contains(hour), (0..<60).contains(minute), hour * 60 + minute <= 30 * 60
+        else {
+            throw Failure(.invalidTime, "时间格式应为 HH:mm，范围 00:00–30:00。")
         }
         return hour * 60 + minute
     }

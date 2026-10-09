@@ -13,9 +13,10 @@ final class AutomationAPITests: XCTestCase {
 
         let response = controller.execute(.init(action: .list))
         let timeline = try XCTUnwrap(response.timeline)
+        let nowMinute = try XCTUnwrap(timeline.nowMinute)
 
-        XCTAssertEqual(timeline.now, String(format: "%02d:%02d", timeline.nowMinute / 60, timeline.nowMinute % 60))
-        XCTAssertEqual(timeline.nextTodoID, store.currentTask(at: timeline.nowMinute)?.id)
+        XCTAssertEqual(timeline.now, String(format: "%02d:%02d", nowMinute / 60, nowMinute % 60))
+        XCTAssertEqual(timeline.nextTodoID, store.currentTask(at: nowMinute)?.id)
         XCTAssertEqual(timeline.nextTodoID, next)
         XCTAssertEqual(response.settings?.clockFormat, "system")
         XCTAssertEqual(response.settings?.dockEdge, "left")
@@ -132,6 +133,38 @@ final class AutomationAPITests: XCTestCase {
         XCTAssertEqual(restored.todos?.first?.time, "10:15")
         XCTAssertNil(restored.todos?.last?.time)
         XCTAssertEqual(restored.settings, settings)
+    }
+
+    func testOutOfRangeClockValuesAreRejected() {
+        let (store, url) = makeStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = AutomationController(store: store)
+
+        for time in ["09:99", "31:00", "-1:00"] {
+            let response = controller.execute(.init(action: .addMany, todos: [.init(title: "开会", time: time)]))
+            XCTAssertEqual(response.errorCode, .invalidTime, time)
+        }
+        XCTAssertTrue(store.items.isEmpty)
+        XCTAssertTrue(controller.execute(.init(action: .add, title: "取整", time: "10:07")).ok)
+        XCTAssertEqual(store.items.first?.minute, 10 * 60 + 15)
+    }
+
+    func testResponsesFromOlderAppsStillDecode() throws {
+        let old = #"{"ok":true,"action":"list","todos":[],"timeline":{"startMinute":420,"endMinute":1500,"start":"07:00","end":"25:00","intervalMinutes":15}}"#
+        let response = try JSONDecoder().decode(DaylineAutomationResponse.self, from: Data(old.utf8))
+        XCTAssertNil(response.timeline?.now)
+        XCTAssertNil(response.errorCode)
+    }
+
+    func testMalformedParametersKeepTheRequestIdentity() throws {
+        let id = UUID()
+        let url = try XCTUnwrap(URL(string:
+            "dayline://automation/v1?request=\(id.uuidString)&action=update-settings&settings=%7B%22fontSize%22%3A%22big%22%7D"
+        ))
+        XCTAssertThrowsError(try DaylineAutomationRequest(url: url))
+        let identity = try XCTUnwrap(DaylineAutomationRequest.identity(of: url))
+        XCTAssertEqual(identity.requestID, id)
+        XCTAssertEqual(identity.action, .updateSettings)
     }
 
     private func makeStore() -> (TimelineStore, URL) {

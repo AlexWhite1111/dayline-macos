@@ -66,8 +66,10 @@ Regenerate the checked-in icon with `scripts/make-icon.sh` only when changing it
   Active follow uses the Store's existing `clockTimer` ticks.
 - Store owns slot snapping, collision placement and range adjustment.
 - UI/CLI/MCP share one Store. CLI/MCP → `dayline://automation/v1` →
-  `AppDelegate` → `AutomationController` → `TimelineStore`. The six MCP tools are
-  listed in README; list before planning, and treat `time` as deadline.
+  `AppDelegate` → `AutomationController` → `TimelineStore`. The ten MCP tools are listed in README; list before planning,
+  use its `now`/`nextTodoID` instead of recomputing the cyclic rule, and treat
+  `time` as deadline. `TimelinePanelControlling` is automation's only window-state
+  path (show, control rail).
 
 ## Safe tests and handoff
 
