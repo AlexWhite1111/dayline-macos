@@ -77,8 +77,13 @@ final class FloatingPanelController: NSWindowController {
         panel.isReleasedWhenClosed = false
         panel.animationBehavior = .none
         panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenNone]
+        panel.collectionBehavior = spacesBehavior(showsOverFullScreen: false)
         return panel
+    }
+
+    /// Auxiliary panels may appear in another app's full-screen Space.
+    private static func spacesBehavior(showsOverFullScreen: Bool) -> NSWindow.CollectionBehavior {
+        [.canJoinAllSpaces, showsOverFullScreen ? .fullScreenAuxiliary : .fullScreenNone]
     }
 
     init(store: TimelineStore) {
@@ -226,6 +231,17 @@ final class FloatingPanelController: NSWindowController {
                     else { return }
                     self.scrollAutoReturnTargetToAnchor()
                 }
+            }
+            .store(in: &subscriptions)
+
+        store.$showsOverFullScreen
+            .removeDuplicates()
+            .sink { [weak self] shows in
+                guard let self else { return }
+                let behavior = Self.spacesBehavior(showsOverFullScreen: shows)
+                ([self.panel, self.axisPanel] + Array(self.todoPanels.values))
+                    .forEach { $0.collectionBehavior = behavior }
+                self.refreshWindowLevels()
             }
             .store(in: &subscriptions)
 
@@ -434,6 +450,9 @@ final class FloatingPanelController: NSWindowController {
         let todoPanel = Self.makePanel()
         todoPanel.allowsKeyFocus = false
         todoPanel.hasShadow = true
+        todoPanel.collectionBehavior = Self.spacesBehavior(
+            showsOverFullScreen: store.showsOverFullScreen
+        )
         let hostingView = TodoHostingView(
             rootView: TodoPillView(
                 store: store,

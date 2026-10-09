@@ -116,6 +116,19 @@ final class TimelineStoreTitleExpansionTests: XCTestCase {
         XCTAssertEqual(restored.autoReturnDelay, 40)
     }
 
+    func testClockFormatAndFullScreenVisibilityPersist() {
+        let (store, url) = makeStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        store.clockFormat = .twelveHour
+        store.showsOverFullScreen = true
+        store.persist()
+
+        let restored = TimelineStore(stateURL: url, startsTimer: false)
+        XCTAssertEqual(restored.clockFormat, .twelveHour)
+        XCTAssertTrue(restored.usesTwelveHourClock)
+        XCTAssertTrue(restored.showsOverFullScreen)
+    }
+
     func testCommitEditingFinalizesTheActiveTitleAndClearsEditing() {
         let (store, url) = makeStore()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

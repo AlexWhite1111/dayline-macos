@@ -98,4 +98,13 @@ final class DayClockTests: XCTestCase {
         components.second = second
         return try XCTUnwrap(calendar.date(from: components))
     }
+
+    func testTwelveHourDisplayHasNoPeriodMarker() {
+        XCTAssertEqual(DayClock.displayTime(21 * 60 + 30, twelveHour: true), "9:30")
+        XCTAssertEqual(DayClock.displayTime(12 * 60, twelveHour: true), "12:00")
+        XCTAssertEqual(DayClock.displayTime(24 * 60 + 15, twelveHour: true), "12:15")
+        XCTAssertEqual(DayClock.displayTime(21 * 60 + 30), "21:30")
+        XCTAssertEqual(DayClock.displayHour(13, twelveHour: true), 1)
+        XCTAssertEqual(DayClock.displayHour(0, twelveHour: true), 12)
+    }
 }

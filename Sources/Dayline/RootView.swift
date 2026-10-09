@@ -285,10 +285,20 @@ private struct SettingsPopover: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                Picker("时钟", selection: $store.clockFormat) {
+                    Text("跟随系统").tag(ClockFormat.system)
+                    Text("24 小时").tag(ClockFormat.twentyFourHour)
+                    Text("12 小时").tag(ClockFormat.twelveHour)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 Toggle("开机自动启动", isOn: launchAtLoginBinding)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                Toggle("全屏应用上也显示", isOn: $store.showsOverFullScreen)
                     .toggleStyle(.switch)
                     .controlSize(.small)
 

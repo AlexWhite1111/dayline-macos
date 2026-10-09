@@ -36,7 +36,7 @@ struct TodoPillView: View {
     private var timeLabel: String {
         switch store.timeDisplayMode {
         case .absolute:
-            return DayClock.displayTime(visibleMinute)
+            return DayClock.displayTime(visibleMinute, twelveHour: store.usesTwelveHourClock)
         case .remaining:
             return DayClock.displayRemaining(
                 taskMinute: visibleMinute,
@@ -240,6 +240,7 @@ struct TodoPillView: View {
                     startMinute: store.timelineStartMinute,
                     endMinute: store.timelineEndMinute,
                     selectedMinute: currentItem.minute,
+                    twelveHour: store.usesTwelveHourClock,
                     clickGuardDuration: store.clickGuardDuration,
                     onSelectMinute: { minute in
                         performAfterCommittingEdit {
@@ -329,6 +330,7 @@ private struct TimeMenuInteraction: NSViewRepresentable {
     let startMinute: Int
     let endMinute: Int
     let selectedMinute: Int
+    let twelveHour: Bool
     let clickGuardDuration: TimeInterval
     let onSelectMinute: (Int) -> Void
     let onDoubleClick: () -> Void
@@ -345,6 +347,7 @@ private struct TimeMenuInteraction: NSViewRepresentable {
         view.startMinute = startMinute
         view.endMinute = endMinute
         view.selectedMinute = selectedMinute
+        view.twelveHour = twelveHour
         view.setAccessibilityValue(DayClock.displayRangeTime(selectedMinute))
         view.clickGuardDuration = clickGuardDuration
         view.onSelectMinute = onSelectMinute
@@ -355,6 +358,7 @@ private struct TimeMenuInteraction: NSViewRepresentable {
         var startMinute = DayClock.startMinute
         var endMinute = DayClock.endMinute
         var selectedMinute = DayClock.startMinute
+        var twelveHour = false
         var clickGuardDuration = TimelineStore.defaultClickGuardDuration
         var onSelectMinute: ((Int) -> Void)?
         var onDoubleClick: (() -> Void)?
@@ -387,9 +391,20 @@ private struct TimeMenuInteraction: NSViewRepresentable {
             let menu = NSMenu()
             menu.autoenablesItems = false
             var selectedItem: NSMenuItem?
+            var period: String?
             for minute in stride(from: startMinute, through: endMinute - 15, by: 15) {
+                if twelveHour {
+                    // Bare 12-hour labels repeat, so headers name the period.
+                    let next = minute >= 24 * 60 ? "次日" : (minute < 12 * 60 ? "上午" : "下午")
+                    if next != period {
+                        menu.addItem(.sectionHeader(title: next))
+                        period = next
+                    }
+                }
                 let item = NSMenuItem(
-                    title: DayClock.displayRangeTime(minute),
+                    title: twelveHour
+                        ? DayClock.displayTime(minute, twelveHour: true)
+                        : DayClock.displayRangeTime(minute),
                     action: #selector(selectMinute(_:)),
                     keyEquivalent: ""
                 )

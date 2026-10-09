@@ -24,6 +24,8 @@ final class TimelineStore: ObservableObject {
     }
     @Published var nativeGlassStyle: NativeGlassStyle = .regular { didSet { saveWhenReady() } }
     @Published var timeDisplayMode: TimeDisplayMode = .absolute { didSet { saveWhenReady() } }
+    @Published var clockFormat: ClockFormat = .system { didSet { saveWhenReady() } }
+    @Published var showsOverFullScreen = false { didSet { saveWhenReady() } }
     @Published var pinsOnlyCurrentTask = false { didSet { saveWhenReady() } }
     @Published var clickGuardDuration = defaultClickGuardDuration { didSet { saveWhenReady() } }
     @Published var autoReturnMode: AutoReturnMode = .off { didSet { saveWhenReady() } }
@@ -114,6 +116,16 @@ final class TimelineStore: ObservableObject {
     }
 
     var nextTask: TodoItem? { currentTask(at: currentMinute) }
+
+    var usesTwelveHourClock: Bool {
+        switch clockFormat {
+        case .twelveHour: true
+        case .twentyFourHour: false
+        case .system:
+            DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .autoupdatingCurrent)?
+                .contains("a") ?? false
+        }
+    }
 
     func minuteFraction(at date: Date) -> Double {
         DayClock.minuteOfDayFraction(for: date, dayEndMinute: timelineEndMinute)
@@ -267,6 +279,8 @@ final class TimelineStore: ObservableObject {
             pinsOnlyCurrentTask: pinsOnlyCurrentTask,
             clickGuardDuration: clickGuardDuration,
             timeDisplayMode: timeDisplayMode,
+            clockFormat: clockFormat,
+            showsOverFullScreen: showsOverFullScreen,
             autoReturnMode: autoReturnMode,
             autoReturnDelay: autoReturnDelay
         )
@@ -348,6 +362,8 @@ final class TimelineStore: ObservableObject {
             timelineAnchorPosition = saved.timelineAnchorPosition ?? timelineAnchorPosition
             nativeGlassStyle = saved.nativeGlassStyle ?? nativeGlassStyle
             timeDisplayMode = saved.timeDisplayMode ?? timeDisplayMode
+            clockFormat = saved.clockFormat ?? clockFormat
+            showsOverFullScreen = saved.showsOverFullScreen ?? showsOverFullScreen
             pinsOnlyCurrentTask = saved.pinsOnlyCurrentTask ?? pinsOnlyCurrentTask
             clickGuardDuration = saved.clickGuardDuration ?? clickGuardDuration
             autoReturnMode = saved.autoReturnMode

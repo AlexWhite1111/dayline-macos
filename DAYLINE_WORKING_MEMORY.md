@@ -208,3 +208,24 @@ installed to /Applications/今日.app and launched. Strict deep signature verifi
 three installed binaries match the package. Build 55 and data snapshots are in
 work/install-build56/. timeline.json hash unchanged across quit/install/launch;
 read-only `dayline list` succeeded. outputs/今日.app stays at its committed state.
+
+## Alignment — 2026-10-09 lightweight 12-hour clock
+
+Intent, decided with the user: a persisted clock format (跟随系统 / 24 小时 / 12
+小时, default system). 12-hour shows bare numbers with no AM/PM marker: pill times
+(21:30 → 9:30) and hour numerals (13 → 1). The time menu groups items under
+上午 / 下午 / 次日 section headers in 12-hour mode so equal labels stay distinct.
+Settings range pickers, accessibility values, CLI and MCP stay 24-hour. The axis
+hit band keeps its deliberate 7:3 split (outer toward the screen edge catches
+clicks, inner 3 pt is the only part over other apps' content); no change there.
+
+Implemented: `ClockFormat` (system/24/12) persisted on the Store; `usesTwelveHourClock`
+resolves the system preference from the "j" template. Pills, hour numerals and the
+time menu (with 上午/下午/次日 section headers) use it. Added `showsOverFullScreen`
+(default off): panels switch between `.fullScreenNone` and `.fullScreenAuxiliary`
+together, including later task panels. Settings gained a 时钟 picker and a
+全屏应用上也显示 switch.
+Verification: check.sh passed, 57 tests. Critique fixture with the switch on:
+CGWindow reported its windows on screen inside another app's full-screen Space
+while installed build 56 (switch absent) stayed off screen; 12-hour pills read
+1:15 for 13:15 and the 13:00 numeral reads 1.

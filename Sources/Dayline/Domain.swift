@@ -15,6 +15,12 @@ enum TimeDisplayMode: String, Codable {
     case remaining
 }
 
+enum ClockFormat: String, Codable {
+    case system
+    case twentyFourHour
+    case twelveHour
+}
+
 enum AutoReturnMode: String, Codable {
     case off
     case currentTime
@@ -76,6 +82,8 @@ struct SavedState: Codable {
     var pinsOnlyCurrentTask: Bool? = nil
     var clickGuardDuration: Double? = nil
     var timeDisplayMode: TimeDisplayMode? = nil
+    var clockFormat: ClockFormat? = nil
+    var showsOverFullScreen: Bool? = nil
     var autoReturnMode: AutoReturnMode? = nil
     // Build 49 and earlier migration input. New saves leave this absent.
     var autoReturnToCurrentTime: Bool? = nil
@@ -145,9 +153,17 @@ enum DayClock {
         min(max(minute, Double(start)), Double(end - 15))
     }
 
-    static func displayTime(_ minute: Int) -> String {
+    /// 12-hour times carry no AM/PM marker; position on the timeline gives the period.
+    static func displayTime(_ minute: Int, twelveHour: Bool = false) -> String {
         let safeMinute = max(0, minute)
-        return String(format: "%02d:%02d", (safeMinute / 60) % 24, safeMinute % 60)
+        let hour = (safeMinute / 60) % 24
+        return twelveHour
+            ? String(format: "%d:%02d", displayHour(hour, twelveHour: true), safeMinute % 60)
+            : String(format: "%02d:%02d", hour, safeMinute % 60)
+    }
+
+    static func displayHour(_ hour: Int, twelveHour: Bool) -> Int {
+        twelveHour ? (hour + 11) % 12 + 1 : hour
     }
 
     static func displayRangeTime(_ minute: Int) -> String {

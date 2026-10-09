@@ -55,6 +55,7 @@ struct TimelineView: View {
                                     projectionMinute: store.projectionMinute,
                                     dockEdge: store.dockEdge,
                                     showsHourNumeral: !occupiedMinutes.contains(minute),
+                                    twelveHour: store.usesTwelveHourClock,
                                     isFirst: minute == store.timelineStartMinute,
                                     isLast: minute == store.timelineEndMinute
                                 )
@@ -105,7 +106,7 @@ struct TimelineView: View {
                 }
                 .mask(edgeFade(height: geometry.size.height, distance: fadeDistance))
                 .accessibilityIdentifier("dayline.timeline")
-                .accessibilityValue(focusMinute.map(DayClock.displayTime) ?? "")
+                .accessibilityValue(focusMinute.map { DayClock.displayTime($0) } ?? "")
                 .task(id: [store.timelineStartMinute, store.timelineEndMinute]) {
                     await Task.yield()
                     seedFocus(currentMinute)
@@ -246,6 +247,7 @@ private struct SlotScale: View {
     let dockEdge: DockEdge
     /// Hours with a task show the task's own time instead of a numeral.
     let showsHourNumeral: Bool
+    let twelveHour: Bool
     let isFirst: Bool
     let isLast: Bool
 
@@ -275,7 +277,7 @@ private struct SlotScale: View {
             if isHour && showsHourNumeral {
                 // The hour numeral replaces the long tick in the axis-to-pill gap.
                 context.draw(
-                    Text("\((minute / 60) % 24)")
+                    Text("\(DayClock.displayHour((minute / 60) % 24, twelveHour: twelveHour))")
                         .font(.system(size: 8, weight: .semibold, design: .rounded).monospacedDigit())
                         .foregroundStyle(Color.primary.opacity(0.42)),
                     at: CGPoint(x: axisX + direction * 2.5, y: tickY),
