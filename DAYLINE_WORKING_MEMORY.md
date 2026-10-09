@@ -163,3 +163,9 @@ Verification: `./scripts/check.sh` passed (50 tests incl. 3 new: unknown-ID
 automation, range-shrink order, burst save). Not packaged/installed; popover
 arrow, scroll-indicator hiding and quit-save need installed-app observation.
 Deferred: auto-return sink merge, single owner for drag preview minute.
+
+Build 55 installation: CFBundleVersion 55 packaged to outputs/今日.app, installed to
+/Applications/今日.app and launched. Strict deep signature verified; all three
+installed binaries match the package. Build 54 and pre-install data snapshots are in
+work/install-build55/. timeline.json hash unchanged across quit/install/launch;
+read-only `dayline list` succeeded against the running build.
