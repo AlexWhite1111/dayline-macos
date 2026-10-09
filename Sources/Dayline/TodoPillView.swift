@@ -195,7 +195,7 @@ struct TodoPillView: View {
                 .textFieldStyle(.plain)
                 .focused($titleIsFocused)
                 .onSubmit(commitEditing)
-                .onExitCommand(perform: commitEditing)
+                .onExitCommand { store.cancelEditing() }
                 .frame(width: displayedTitleWidth, alignment: .leading)
                 .opacity(isEditing ? 1 : 0)
                 .allowsHitTesting(isEditing)
@@ -242,7 +242,10 @@ struct TodoPillView: View {
                     selectedMinute: currentItem.minute,
                     clickGuardDuration: store.clickGuardDuration,
                     onSelectMinute: { minute in
-                        performAfterCommittingEdit { store.move(id: item.id, to: minute) }
+                        performAfterCommittingEdit {
+                            store.move(id: item.id, to: minute)
+                            store.focusMinute = store.item(id: item.id)?.minute
+                        }
                     },
                     onDoubleClick: {
                         performAfterCommittingEdit {
@@ -386,7 +389,7 @@ private struct TimeMenuInteraction: NSViewRepresentable {
             var selectedItem: NSMenuItem?
             for minute in stride(from: startMinute, through: endMinute - 15, by: 15) {
                 let item = NSMenuItem(
-                    title: DayClock.displayTime(minute),
+                    title: DayClock.displayRangeTime(minute),
                     action: #selector(selectMinute(_:)),
                     keyEquivalent: ""
                 )

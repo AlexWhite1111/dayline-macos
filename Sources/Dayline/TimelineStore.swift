@@ -35,7 +35,14 @@ final class TimelineStore: ObservableObject {
     @Published var timelineStartMinute = DayClock.startMinute { didSet { saveWhenReady() } }
     @Published var timelineEndMinute = DayClock.endMinute { didSet { saveWhenReady() } }
     @Published var focusMinute: Int?
-    @Published var editingID: UUID?
+    @Published var editingID: UUID? {
+        didSet {
+            guard editingID != oldValue else { return }
+            editingOriginalTitle = editingID.flatMap { item(id: $0)?.title }
+        }
+    }
+    /// The last deleted titled task, offered for undo for a few seconds.
+    @Published private(set) var recentlyDeleted: TodoItem?
     @Published var projectionMinute: Int?
     @Published var pillTitleLimit = DaylineLayout.defaultCompactTitleWidth
     @Published private(set) var clockDate = Date()
@@ -43,6 +50,8 @@ final class TimelineStore: ObservableObject {
     private(set) var hasSavedPlacement = false
     private var savesChanges = false
     private var pendingSave: DispatchWorkItem?
+    private var editingOriginalTitle: String?
+    private var undoExpiry: DispatchWorkItem?
     private var clockTimer: Timer?
     private let stateURL: URL
 
@@ -68,18 +77,22 @@ final class TimelineStore: ObservableObject {
         title: String = "",
         at minute: Int? = nil
     ) -> UUID {
+        let preferred = minute ?? DayClock.defaultTaskMinute(
+            start: timelineStartMinute,
+            end: timelineEndMinute
+        )
         let item = TodoItem(
             id: id,
             title: title,
-            minute: availableQuarter(near: minute ?? DayClock.defaultTaskMinute(
-                start: timelineStartMinute,
-                end: timelineEndMinute
-            )),
+            minute: availableQuarter(near: preferred) ?? quarter(atOrAfter: preferred),
             createdAt: Date()
         )
         items.append(item)
         return item.id
     }
+
+    /// Callers check this before `addTask`; every task owns a distinct quarter.
+    var hasFreeSlot: Bool { items.count < (timelineEndMinute - timelineStartMinute) / 15 }
 
     func item(id: UUID) -> TodoItem? {
         items.first { $0.id == id }
@@ -122,16 +135,25 @@ final class TimelineStore: ObservableObject {
         mutate(id) { $0.title = title }
     }
 
-    func finalizeTitle(id: UUID) {
-        guard let value = item(id: id)?.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Trims the edited title. An emptied task is deleted; undo restores its old title.
+    func commitEditing() {
+        guard let id = editingID,
+              let value = item(id: id)?.title.trimmingCharacters(in: .whitespacesAndNewlines)
         else { return }
-        value.isEmpty ? delete(id: id) : updateTitle(id: id, title: value)
+        if value.isEmpty {
+            updateTitle(id: id, title: editingOriginalTitle ?? "")
+            delete(id: id)
+        } else {
+            updateTitle(id: id, title: value)
+        }
+        editingID = nil
     }
 
-    func commitEditing() {
-        guard let editingID else { return }
-        finalizeTitle(id: editingID)
-        self.editingID = nil
+    /// Esc: restore the title from before editing. A new untitled task is removed.
+    func cancelEditing() {
+        guard let id = editingID else { return }
+        updateTitle(id: id, title: editingOriginalTitle ?? "")
+        commitEditing()
     }
 
     func toggleTitleExpansion(id: UUID) {
@@ -155,36 +177,67 @@ final class TimelineStore: ObservableObject {
     }
 
     func move(id: UUID, to minute: Int) {
-        let destination = availableQuarter(near: minute, excluding: id)
+        guard let destination = availableQuarter(near: minute, excluding: id) else { return }
         mutate(id) { $0.minute = destination }
     }
 
+    /// Drag previews snap to the nearest quarter; new tasks still round up.
     func dragDestination(near minute: Double, excluding id: UUID) -> Int {
-        availableQuarter(near: quarter(atOrAfter: minute), excluding: id)
+        let nearest = DayClock.clamp(
+            Int((minute / 15).rounded()) * 15,
+            start: timelineStartMinute,
+            end: timelineEndMinute
+        )
+        return availableQuarter(near: nearest, excluding: id) ?? nearest
     }
 
     func delete(id: UUID) {
-        items.removeAll { $0.id == id }
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        let removed = items.remove(at: index)
+        guard !removed.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        recentlyDeleted = removed
+        undoExpiry?.cancel()
+        let expiry = DispatchWorkItem { [weak self] in self?.recentlyDeleted = nil }
+        undoExpiry = expiry
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: expiry)
     }
 
-    func setTimelineStart(_ minute: Int) {
+    func undoDelete() {
+        guard var item = recentlyDeleted,
+              let minute = availableQuarter(near: item.minute)
+        else { return }
+        undoExpiry?.cancel()
+        recentlyDeleted = nil
+        item.minute = minute
+        items.append(item)
+    }
+
+    @discardableResult
+    func setTimelineStart(_ minute: Int) -> Bool {
         setTimelineRange(
             start: min(max(0, minute), timelineEndMinute - 60),
             end: timelineEndMinute
         )
     }
 
-    func setTimelineEnd(_ minute: Int) {
+    @discardableResult
+    func setTimelineEnd(_ minute: Int) -> Bool {
         setTimelineRange(
             start: timelineStartMinute,
             end: min(max(minute, timelineStartMinute + 60), 30 * 60)
         )
     }
 
-    func setTimelineRange(start: Int, end: Int) {
-        timelineStartMinute = min(max(start, 0), 23 * 60)
-        timelineEndMinute = min(max(end, timelineStartMinute + 60), 30 * 60)
+    /// Refuses a range with fewer quarters than tasks.
+    @discardableResult
+    func setTimelineRange(start: Int, end: Int) -> Bool {
+        let start = min(max(start, 0), 23 * 60)
+        let end = min(max(end, start + 60), 30 * 60)
+        guard items.count <= (end - start) / 15 else { return false }
+        timelineStartMinute = start
+        timelineEndMinute = end
         clampItemsToRange()
+        return true
     }
 
     func useInitialPlacement(edge: DockEdge, y: Double) {
@@ -247,7 +300,7 @@ final class TimelineStore: ObservableObject {
         var occupied = Set<Int>()
         var placed: [UUID: Int] = [:]
         for item in placementOrder {
-            let minute = availableQuarter(near: item.minute, occupied: occupied)
+            let minute = availableQuarter(near: item.minute, occupied: occupied) ?? item.minute
             occupied.insert(minute)
             placed[item.id] = minute
         }
@@ -258,14 +311,14 @@ final class TimelineStore: ObservableObject {
         }
     }
 
-    private func availableQuarter(near minute: Int, excluding id: UUID? = nil) -> Int {
+    private func availableQuarter(near minute: Int, excluding id: UUID? = nil) -> Int? {
         availableQuarter(
             near: minute,
             occupied: Set(items.compactMap { $0.id == id ? nil : $0.minute })
         )
     }
 
-    private func availableQuarter(near minute: Int, occupied: Set<Int>) -> Int {
+    private func availableQuarter(near minute: Int, occupied: Set<Int>) -> Int? {
         let target = quarter(atOrAfter: minute)
         for candidate in stride(from: target, through: timelineEndMinute - 15, by: 15)
         where !occupied.contains(candidate) {
@@ -277,7 +330,7 @@ final class TimelineStore: ObservableObject {
                 return candidate
             }
         }
-        return target
+        return nil
     }
 
     private func restore() {

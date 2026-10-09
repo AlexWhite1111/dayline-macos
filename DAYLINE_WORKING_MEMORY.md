@@ -169,3 +169,36 @@ Build 55 installation: CFBundleVersion 55 packaged to outputs/今日.app, instal
 installed binaries match the package. Build 54 and pre-install data snapshots are in
 work/install-build55/. timeline.json hash unchanged across quit/install/launch;
 read-only `dayline list` succeeded against the running build.
+
+## Alignment — 2026-10-09 interaction fixes (groups A and B of the UI critique)
+
+Intent, decided with the user: Esc cancels a title edit (restores the original; a
+new empty task is removed). Deletion offers an inline undo chip at the task's slot
+for a few seconds — ⌘Z cannot reach a non-activating panel reliably. Auto-return
+and active follow pause while a title is edited and restart when editing ends.
+Drag preview snaps to the nearest quarter (new tasks still round up). When no free
+slot exists, adding fails (beep / automation error) and range shrinking that cannot
+fit all tasks is refused. Hour ticks show faint hour numerals in the axis-to-pill
+gap. "Return to now" keeps following now until the next manual scroll; its dot
+shows only when now is more than one slot outside the viewport and inside the
+range. Time menu labels next-day items with 次日. A moved task (time menu) is
+scrolled into view. Overdue incomplete tasks stay unchanged (cyclic timeline).
+Owners: Store (editing, undo record, placement), FloatingPanelController (auto-
+return, follow-now), TimelineView (labels, return dot, undo chip), TodoPillView.
+
+Implemented as aligned above. Store: `editingID` snapshots the original title;
+`cancelEditing` (Esc) restores it; `commitEditing` deletes an emptied task after
+restoring its old title so undo brings it back; `recentlyDeleted` + `undoDelete`
+(5 s, titled tasks only); `hasFreeSlot`; `setTimelineRange` returns false when the
+range cannot hold every task; `availableQuarter` returns nil when full; drag uses
+nearest-quarter snapping. Controller: `followsNow`, editing restarts/pauses the
+inactivity countdown, auto paths skip while editing. TimelineView: return dot needs
+now in range and more than one slot outside; undo chip at the deleted slot; hour
+numerals only on hours without a task. Time menu uses `displayRangeTime`; choosing
+a time scrolls `focusMinute` to the placed task.
+
+Verification: `./scripts/check.sh` passed, 55 tests (5 new store tests, 2 updated
+return-dot tests). Isolated critique fixture (work/ui-critique, own state file)
+rendered numerals in dark mode, the undo chip at the deleted slot, and no return dot
+when now sits at the top. Real clicks, Esc, drag feel and undo-chip clicking were
+not exercised; computer-use cannot target accessory apps.

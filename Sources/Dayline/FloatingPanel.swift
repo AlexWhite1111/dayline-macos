@@ -54,6 +54,8 @@ final class FloatingPanelController: NSWindowController {
     private var pendingOverlayUpdate: Bool?
     private var autoReturnWorkItem: DispatchWorkItem?
     private(set) var autoReturnIsActive = false
+    /// Set by "return to now"; first-todo follow tracks now until the next interaction.
+    private var followsNow = false
 
     private let collapsedSize = NSSize(width: 48, height: 44)
     private let edgeInset: CGFloat = 2
@@ -225,6 +227,12 @@ final class FloatingPanelController: NSWindowController {
                     self.scrollAutoReturnTargetToAnchor()
                 }
             }
+            .store(in: &subscriptions)
+
+        store.$editingID
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in self?.registerTimelineInteraction() }
             .store(in: &subscriptions)
 
         store.$timelineAnchorPosition
@@ -560,7 +568,9 @@ final class FloatingPanelController: NSWindowController {
         scheduleAutoReturn(delay: delay)
     }
 
+    /// Restarts the inactivity countdown; editing keeps it paused until it ends.
     private func registerTimelineInteraction() {
+        followsNow = false
         guard store.autoReturnMode != .off else { return }
         autoReturnIsActive = false
         scheduleAutoReturn()
@@ -572,7 +582,7 @@ final class FloatingPanelController: NSWindowController {
         let workItem = DispatchWorkItem { [weak self] in
             guard let self, self.store.autoReturnMode != .off else { return }
             self.autoReturnWorkItem = nil
-            guard self.dragSession == nil else { return }
+            guard self.dragSession == nil, self.store.editingID == nil else { return }
             self.autoReturnIsActive = true
             self.scrollAutoReturnTargetToAnchor()
         }
@@ -582,11 +592,13 @@ final class FloatingPanelController: NSWindowController {
 
     private func returnToCurrentTime() {
         registerTimelineInteraction()
+        followsNow = true
         scrollToAnchor(store.clampToRange(store.minuteFraction(at: Date())))
     }
 
     private func scrollAutoReturnTargetToAnchor(at date: Date? = nil) {
-        guard let minute = autoReturnTargetMinute(at: date ?? store.clockDate) else { return }
+        guard store.editingID == nil,
+              let minute = autoReturnTargetMinute(at: date ?? store.clockDate) else { return }
         scrollToAnchor(minute)
     }
 
@@ -646,7 +658,9 @@ final class FloatingPanelController: NSWindowController {
         switch store.autoReturnMode {
         case .off: return nil
         case .currentTime: return now
-        case .firstTodo: return store.currentTask(at: Int(minute)).map { Double($0.minute) } ?? now
+        case .firstTodo:
+            if followsNow { return now }
+            return store.currentTask(at: Int(minute)).map { Double($0.minute) } ?? now
         }
     }
 

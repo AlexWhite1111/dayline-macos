@@ -19,6 +19,7 @@ final class AutomationController {
                 let title = try requiredTitle(request.title)
                 let minute = try request.time.map(parseTime)
                 let id = request.itemID ?? UUID()
+                guard store.hasFreeSlot else { throw Failure("时间轴已满，没有空闲的 15 分钟刻度。") }
                 store.addTask(id: id, title: title, at: minute)
                 return success(request.action, todos: [todo(id)])
 
@@ -32,7 +33,9 @@ final class AutomationController {
                 let start = try parseClock(request.start)
                 let rawEnd = try parseClock(request.end)
                 let end = rawEnd < 24 * 60 && rawEnd <= start ? rawEnd + 24 * 60 : rawEnd
-                store.setTimelineRange(start: start, end: end)
+                guard store.setTimelineRange(start: start, end: end) else {
+                    throw Failure("这个范围放不下现有的 \(store.items.count) 个待办。")
+                }
                 return success(
                     request.action,
                     message: "时间轴范围已更新为 \(automationTime(start))–\(automationTime(end))。"

@@ -64,6 +64,7 @@ struct RootView: View {
     }
 
     private func addTask() {
+        guard store.hasFreeSlot else { return NSSound.beep() }
         let id = store.addTask(at: store.focusMinute)
         store.focusMinute = store.item(id: id)!.minute
         store.editingID = id
@@ -371,11 +372,11 @@ private struct SettingsPopover: View {
     }
 
     private var startBinding: Binding<Int> {
-        Binding(get: { store.timelineStartMinute }, set: store.setTimelineStart)
+        Binding(get: { store.timelineStartMinute }) { if !store.setTimelineStart($0) { NSSound.beep() } }
     }
 
     private var endBinding: Binding<Int> {
-        Binding(get: { store.timelineEndMinute }, set: store.setTimelineEnd)
+        Binding(get: { store.timelineEndMinute }) { if !store.setTimelineEnd($0) { NSSound.beep() } }
     }
 
     private var launchAtLoginBinding: Binding<Bool> {

@@ -30,13 +30,17 @@ struct TimelineView: View {
                 )
             )
             let currentMinute = store.currentMinute
+            let occupiedMinutes = Set(store.items.map(\.minute))
             let projection = measuredProjection
                 ?? store.unmeasuredProjection(viewportHeight: geometry.size.height)
-            let returnEdge = Self.currentTimeReturnEdge(
-                minute: currentMinute,
-                projection: projection,
-                viewportHeight: geometry.size.height
-            )
+            let returnEdge = (store.timelineStartMinute...store.timelineEndMinute)
+                .contains(currentMinute)
+                ? Self.currentTimeReturnEdge(
+                    minute: currentMinute,
+                    projection: projection,
+                    viewportHeight: geometry.size.height
+                )
+                : nil
 
             ZStack {
                 ScrollView(.vertical) {
@@ -50,6 +54,7 @@ struct TimelineView: View {
                                     nowMinute: currentMinute,
                                     projectionMinute: store.projectionMinute,
                                     dockEdge: store.dockEdge,
+                                    showsHourNumeral: !occupiedMinutes.contains(minute),
                                     isFirst: minute == store.timelineStartMinute,
                                     isLast: minute == store.timelineEndMinute
                                 )
@@ -131,21 +136,69 @@ struct TimelineView: View {
                     .accessibilityLabel("回到现在")
                     .zIndex(50)
                 }
+
+                if let deleted = store.recentlyDeleted {
+                    undoChip(for: deleted)
+                        .frame(
+                            maxWidth: .infinity,
+                            alignment: store.dockEdge == .left ? .leading : .trailing
+                        )
+                        .padding(
+                            store.dockEdge == .left ? .leading : .trailing,
+                            DaylineLayout.pillInset
+                        )
+                        .position(
+                            x: geometry.size.width / 2,
+                            y: min(
+                                max(projection.centerY(for: deleted.minute), fadeDistance * 2),
+                                geometry.size.height - fadeDistance * 2
+                            )
+                        )
+                        .transition(.opacity)
+                        .zIndex(60)
+                }
             }
+            .animation(.easeOut(duration: 0.18), value: store.recentlyDeleted?.id)
         }
     }
 
     enum ReturnEdge { case top, bottom }
 
+    /// Now within one slot of the viewport counts as nearby and shows no return dot.
     static func currentTimeReturnEdge(
         minute: Int,
         projection: TimelineProjection,
         viewportHeight: CGFloat
     ) -> ReturnEdge? {
         let centerY = projection.centerY(for: minute)
-        if centerY < -3 { return .top }
-        if centerY > viewportHeight + 3 { return .bottom }
+        let margin = DaylineLayout.slotHeight(for: projection.fontSize)
+        if centerY < -margin { return .top }
+        if centerY > viewportHeight + margin { return .bottom }
         return nil
+    }
+
+    private func undoChip(for deleted: TodoItem) -> some View {
+        Button(action: store.undoDelete) {
+            HStack(spacing: 6) {
+                Text("已删除「\(deleted.title)」")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 160, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
+                Text("撤销")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(daylineWarm)
+            }
+            .font(.system(size: 11.5, weight: .medium))
+            .padding(.horizontal, 12)
+            .frame(height: DaylineLayout.pillHeight(for: store.fontSize))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .glassCapsule(nativeGlassStyle: store.nativeGlassStyle)
+        .help("恢复刚删除的待办")
+        .accessibilityLabel("撤销删除 \(deleted.title)")
     }
 
     private func edgeFade(height: CGFloat, distance: CGFloat) -> some View {
@@ -191,6 +244,8 @@ private struct SlotScale: View {
     let nowMinute: Int
     let projectionMinute: Int?
     let dockEdge: DockEdge
+    /// Hours with a task show the task's own time instead of a numeral.
+    let showsHourNumeral: Bool
     let isFirst: Bool
     let isLast: Bool
 
@@ -217,11 +272,22 @@ private struct SlotScale: View {
             let dark = isHour ? 0.24 : (isHalfHour ? 0.17 : 0.11)
             let light = isHour ? 0.42 : (isHalfHour ? 0.29 : 0.17)
 
-            var tick = Path()
-            tick.move(to: CGPoint(x: axisX, y: tickY))
-            tick.addLine(to: CGPoint(x: axisX + direction * length, y: tickY))
-            context.stroke(tick, with: .color(.black.opacity(dark)), lineWidth: 2)
-            context.stroke(tick, with: .color(.white.opacity(light)), lineWidth: 0.7)
+            if isHour && showsHourNumeral {
+                // The hour numeral replaces the long tick in the axis-to-pill gap.
+                context.draw(
+                    Text("\((minute / 60) % 24)")
+                        .font(.system(size: 8, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(Color.primary.opacity(0.42)),
+                    at: CGPoint(x: axisX + direction * 2.5, y: tickY),
+                    anchor: dockEdge == .left ? .leading : .trailing
+                )
+            } else {
+                var tick = Path()
+                tick.move(to: CGPoint(x: axisX, y: tickY))
+                tick.addLine(to: CGPoint(x: axisX + direction * length, y: tickY))
+                context.stroke(tick, with: .color(.black.opacity(dark)), lineWidth: 2)
+                context.stroke(tick, with: .color(.white.opacity(light)), lineWidth: 0.7)
+            }
 
             let currentIsInsideRange = !(isFirst && nowMinute < minute)
                 && !(isLast && nowMinute > minute)
